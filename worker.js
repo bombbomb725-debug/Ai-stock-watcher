@@ -1,4 +1,4 @@
-const ALLOWED_SYMBOLS = new Set(["ASTS", "RKLB", "IONQ", "OKLO"]);
+const DEFAULT_SYMBOLS = ["ASTS", "RKLB", "IONQ", "OKLO"];
 const ALLOWED_ORIGINS = new Set([
   "https://bombbomb725-debug.github.io",
 ]);
@@ -56,11 +56,11 @@ export default {
       return json({
         service: "AI Stock Watcher API",
         status: "ready",
-        endpoint: "/api/market?symbols=ASTS,RKLB,IONQ,OKLO",
+        endpoints: ["/api/market?symbols=ASTS,RKLB,IONQ,OKLO", "/api/assets?q=NVDA"],
       }, 200, headers);
     }
 
-    if (url.pathname !== "/api/market") {
+    if (url.pathname === "/api/assets") {\n      const q = (url.searchParams.get("q") || "").trim().toUpperCase();\n      if (q.length < 1 || q.length > 30) return json({ assets: [] }, 200, headers);\n      try {\n        const assetsResponse = await fetch("https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity", { headers: authHeaders });\n        if (!assetsResponse.ok) return json({ error: "Alpaca asset search failed", status: assetsResponse.status }, 502, headers);\n        const allAssets = await assetsResponse.json();\n        const matches = allAssets.filter(a => a.tradable && a.exchange && (a.symbol || "").includes(q) || (a.tradable && a.exchange && (a.name || "").toUpperCase().includes(q)))\n          .slice(0, 20).map(a => ({ symbol: a.symbol, name: a.name, exchange: a.exchange }));\n        return json({ assets: matches }, 200, headers);\n      } catch (error) { return json({ error: "Asset search failed", detail: String(error).slice(0,200) }, 502, headers); }\n    }\n\n    if (url.pathname !== "/api/market") {
       return json({ error: "Not found" }, 404, headers);
     }
 
@@ -71,14 +71,14 @@ export default {
       }, 503, headers);
     }
 
-    const requested = (url.searchParams.get("symbols") || "ASTS,RKLB,IONQ,OKLO")
+    const requested = (url.searchParams.get("symbols") || DEFAULT_SYMBOLS.join(","))
       .split(",")
       .map((symbol) => symbol.trim().toUpperCase())
-      .filter((symbol) => ALLOWED_SYMBOLS.has(symbol));
+      .filter((symbol) => /^[A-Z][A-Z0-9.]{0,9}$/.test(symbol));
 
     const symbols = [...new Set(requested)];
 
-    if (symbols.length === 0) {
+    if (symbols.length > 20) {\n      return json({ error: "Maximum 20 symbols per request" }, 400, headers);\n    }\n\n    if (symbols.length === 0) {
       return json({ error: "No supported symbols requested" }, 400, headers);
     }
 
