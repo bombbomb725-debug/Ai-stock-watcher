@@ -14,3 +14,110 @@ function atrValue(bars,period=14){if(bars.length<period+1)return null;const trs=
 function chartSvg(bars){const rows=bars.slice(-60),cl=rows.map(b=>Number(b.c)),e20=emaSeries(cl,20),e50=emaSeries(cl,50);const vals=[...cl,...e20.filter(Number.isFinite),...e50.filter(Number.isFinite)];if(vals.length<2)return '<div class="chart-empty">ข้อมูลกราฟยังไม่เพียงพอ</div>';let lo=Math.min(...vals),hi=Math.max(...vals),pad=(hi-lo)*.12||1;lo-=pad;hi+=pad;const X=i=>30+i*(560/Math.max(1,rows.length-1)),Y=v=>12+(hi-v)/(hi-lo)*156;const path=a=>a.map((v,i)=>Number.isFinite(v)?(i&&Number.isFinite(a[i-1])?"L":"M")+X(i).toFixed(1)+","+Y(v).toFixed(1):"").join(" ");const last=cl.length-1;return '<div class="chart-wrap"><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคาปิดพร้อม EMA 20 และ EMA 50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span><i class="dot-price"></i> ราคาปิด</span><span><i class="dot-ema20"></i> EMA 20</span><span><i class="dot-ema50"></i> EMA 50</span></div></div>'}
 function entryPlan(bars,analysis){const atr=atrValue(bars),ema20=analysis.short;if(!Number.isFinite(atr)||!Number.isFinite(ema20))return null;const recent=bars.slice(-20),support=Math.min(...recent.map(b=>Number(b.l)).filter(Number.isFinite)),resistance=Math.max(...recent.map(b=>Number(b.h)).filter(Number.isFinite));let low=Math.max(Number.isFinite(support)?support:ema20-atr,ema20-.5*atr),high=ema20+.25*atr;if(low>high)low=ema20-.5*atr;return {low,high,target:resistance,stop:low-atr,atr}}
 function renderCard(symbol,item){const trade=item.trade||{},bars=item.bars||[];const price=Number(trade.p);const prev=bars.length>1?Number(bars[bars.length-2].c):NaN;const change=Number.isFinite(price)&&Number.isFinite(prev)&&prev!==0?(price-prev)/prev*100:null;const a=analyze(bars,price),plan=entryPlan(bars,a);const cls=change===null?"neutral":change>=0?"positive":"negative";const time=trade.t?new Date(trade.t).toLocaleString("th-TH"):"ไม่ระบุเวลา";const planHtml=plan?'<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อ (ประเมินจาก EMA20 + ATR)</div><div class="entry-range">$'+fmt(plan.low)+' – $'+fmt(plan.high)+'</div><div class="entry-levels"><span>แนวต้าน 20 วัน <b>$'+fmt(plan.target)+'</b></span><span>จุดเตือนความเสี่ยง <b>$'+fmt(plan.stop)+'</b></span></div><small>ไม่ใช่ราคาซื้อที่รับประกัน ควรรอแท่งราคายืนยันและแบ่งไม้เข้าซื้อ</small></section>':'<section class="entry-plan"><small>ข้อมูลย้อนหลังยังไม่พอคำนวณโซนเข้าซื้อ</small></section>';return `<article class="stock-card"><div class="stock-head"><div><div class="symbol">${symbol}</div><div class="company">${NAMES[symbol]||item.name||"หุ้นสหรัฐฯ"}</div></div><div class="card-actions"><span class="signal ${a.kind}">${a.signal}</span><button class="remove-stock" data-remove="${symbol}" aria-label="ลบ ${symbol}">×</button></div></div><div class="price">${Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคา"}</div><div class="change ${cls}">${change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า"}</div>${chartSvg(bars)}<div class="metrics"><div class="metric"><span>EMA 20 / 50</span><b>${fmt(a.short)} / ${fmt(a.long)}</b></div><div class="metric"><span>RSI 14</span><b>${fmt(a.rsi)}</b></div><div class="metric"><span>MACD</span><b>${fmt(a.macd)}</b></div></div>${planHtml}<div class="card-foot">เวลาซื้อขายล่าสุด: ${time} · Feed: IEX · คะแนน ${a.score}/4</div></article>`}
+
+
+const DEFAULT_API_URL="https://ai-stock-watcher-api.bombbomb725.workers.dev";
+const apiInput=$("#apiUrl");
+const cards=$("#cards");
+const connection=$("#connection");
+const updated=$("#updated");
+const watchlist=$("#watchlist");
+let apiUrl=localStorage.getItem("stockWatcherApiUrl")||DEFAULT_API_URL;
+apiInput.value=apiUrl;
+
+function setStatus(message,ok=false){
+  connection.textContent=message;
+  const dot=document.querySelector(".live-dot");
+  if(dot)dot.style.background=ok?"#3bd69b":"#f5c96a";
+}
+function renderIdeas(){
+  const root=$("#ideas");
+  root.innerHTML=IDEAS.map(s=>'<button class="idea-chip" type="button" data-idea="'+s+'">'+s+' <small>เพิ่ม</small></button>').join("");
+}
+function renderWatchlist(){
+  watchlist.textContent="กำลังติดตาม "+state.symbols.length+" หุ้น";
+}
+function renderError(message){
+  cards.innerHTML='<article class="stock-card"><b>โหลดข้อมูลไม่สำเร็จ</b><p>'+String(message).replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]))+'</p><small>ตรวจสอบ Worker URL และการ Deploy แล้วกดอัปเดตอีกครั้ง</small></article>';
+}
+async function loadMarket(){
+  if(state.busy)return;
+  state.busy=true;
+  $("#refresh").disabled=true;
+  $("#refresh").textContent="กำลังโหลด…";
+  setStatus("กำลังดึงข้อมูลตลาด");
+  try{
+    if(!state.symbols.length)throw new Error("กรุณาเพิ่มหุ้นอย่างน้อย 1 ตัว");
+    const url=apiUrl.replace(/\/$/,"")+"/api/market?symbols="+encodeURIComponent(state.symbols.join(","));
+    const response=await fetch(url,{cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+    if(!data.stocks)throw new Error("รูปแบบข้อมูลจาก Worker ไม่ถูกต้อง");
+    const html=state.symbols.map(symbol=>{
+      const item=data.stocks[symbol];
+      return item?renderCard(symbol,item):'<article class="stock-card"><b>'+symbol+'</b><p>ไม่พบข้อมูลหุ้นนี้จาก IEX</p></article>';
+    }).join("");
+    cards.innerHTML=html;
+    const counts=data.diagnostics?.barCounts||{};
+    const total=Object.values(counts).reduce((a,b)=>a+(Number(b)||0),0);
+    setStatus("เชื่อมต่อแล้ว · "+(data.feed||"Market data"),true);
+    updated.textContent="อัปเดต "+new Date(data.fetchedAt||Date.now()).toLocaleString("th-TH")+" · แท่งราคาย้อนหลัง "+total+" แท่ง";
+  }catch(error){
+    setStatus("เชื่อมต่อข้อมูลไม่สำเร็จ");
+    renderError(error.message||error);
+  }finally{
+    state.busy=false;
+    $("#refresh").disabled=false;
+    $("#refresh").textContent="↻ อัปเดต";
+  }
+}
+function addSymbol(symbol){
+  symbol=String(symbol||"").trim().toUpperCase();
+  if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol))return;
+  if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
+  if(state.symbols.length>=20){setStatus("ติดตามได้สูงสุด 20 หุ้น");return;}
+  state.symbols.push(symbol);
+  saveSymbols();
+  renderWatchlist();
+  $("#searchResults").innerHTML="";
+  $("#stockSearch").value="";
+  loadMarket();
+}
+async function searchAssets(){
+  const q=$("#stockSearch").value.trim();
+  if(!q)return;
+  const results=$("#searchResults");
+  results.textContent="กำลังค้นหา…";
+  try{
+    const response=await fetch(apiUrl.replace(/\/$/,"")+"/api/assets?q="+encodeURIComponent(q),{cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||"ค้นหาไม่สำเร็จ");
+    state.assets=data.assets||[];
+    results.innerHTML=state.assets.length?state.assets.map(a=>'<button class="search-result" type="button" data-symbol="'+a.symbol+'"><b>'+a.symbol+'</b><span>'+String(a.name||"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]))+'</span><small>เพิ่ม +</small></button>').join(""):"ไม่พบหุ้นที่ตรงกัน";
+  }catch(error){results.textContent="ค้นหาไม่สำเร็จ: "+error.message;}
+}
+$("#refresh").addEventListener("click",loadMarket);
+$("#saveUrl").addEventListener("click",()=>{
+  const value=apiInput.value.trim().replace(/\/$/,"");
+  try{new URL(value);apiUrl=value;localStorage.setItem("stockWatcherApiUrl",apiUrl);setStatus("บันทึก Worker URL แล้ว",true);loadMarket();}
+  catch{setStatus("Worker URL ไม่ถูกต้อง");}
+});
+$("#addStock").addEventListener("click",searchAssets);
+$("#stockSearch").addEventListener("keydown",e=>{if(e.key==="Enter")searchAssets();});
+$("#searchResults").addEventListener("click",e=>{
+  const button=e.target.closest("[data-symbol]");
+  if(button)addSymbol(button.dataset.symbol);
+});
+$("#ideas").addEventListener("click",e=>{
+  const button=e.target.closest("[data-idea]");
+  if(button)addSymbol(button.dataset.idea);
+});
+$("#cards").addEventListener("click",e=>{
+  const button=e.target.closest("[data-remove]");
+  if(!button)return;
+  state.symbols=state.symbols.filter(s=>s!==button.dataset.remove);
+  saveSymbols();renderWatchlist();loadMarket();
+});
+renderIdeas();
+renderWatchlist();
+loadMarket();
