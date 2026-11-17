@@ -1,5 +1,5 @@
 const DEFAULT_SYMBOLS = ["ASTS", "RKLB", "IONQ", "OKLO"];
-const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR"];
+const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR","RDDT","MSTR","TEM","RGTI","QBTS","QUBT","HIMS","CRSP","RXRX","SPCE","APP","ORCL","CRM","NOW","PANW","CRWD","NET","SNOW","MU","TSM","ANET","GEV","CEG","VST","CCJ","LEU","UUUU","QS","ENVX","BBAI"];
 const NAMES = {
   ASTS:"AST SpaceMobile",RKLB:"Rocket Lab",IONQ:"IonQ",OKLO:"Oklo",
   NVDA:"NVIDIA",AMD:"Advanced Micro Devices",TSLA:"Tesla",PLTR:"Palantir",
@@ -15,7 +15,10 @@ const state = {
   assets:[],
   market:{},
   timeframe:localStorage.getItem("stockWatcherTimeframe")||"1Day",
-  apiUrl:localStorage.getItem("stockWatcherApiUrl") || "https://ai-stock-watcher-api.bombbomb725.workers.dev"
+  apiUrl:localStorage.getItem("stockWatcherApiUrl") || "https://ai-stock-watcher-api.bombbomb725.workers.dev",
+  sessionToken:sessionStorage.getItem("stockWatcherSessionToken")||"",
+  user:null,
+  shared:false
 };
 function loadSavedSymbols(){
   try {
@@ -155,7 +158,54 @@ function setStatus(msg,ok=false){
   if(dot)dot.style.background=ok?"#3bd69b":"#f5c96a";
 }
 function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function renderWatchlist(){ $("#watchlist").textContent="กำลังติดตาม "+state.symbols.length+" หุ้น"; }
+function renderWatchlist(){ $("#watchlist").textContent="กำลังติดตาม "+state.symbols.length+"/50 หุ้น"+(state.shared?" · ซิงก์กับ LINE แล้ว":" · ยังไม่ซิงก์"); }
+async function apiRequest(path,options={}) {
+  const headers={"Content-Type":"application/json",...(options.headers||{})};
+  if(state.sessionToken)headers.Authorization="Bearer "+state.sessionToken;
+  const response=await fetch(state.apiUrl.replace(/\/$/,"")+path,{...options,headers,cache:"no-store"});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+  return data;
+}
+async function initializeAccount() {
+  const liffId=window.AI_STOCK_WATCHER_CONFIG?.LIFF_ID||"";
+  if(!liffId||liffId.includes("ใส่")) {
+    setStatus("รอตั้งค่า LINE Login / LIFF");
+    $("#accountStatus").textContent="ยังไม่ได้ตั้งค่า LIFF ID — Watchlist ยังไม่ซิงก์ข้ามเว็บกับ LINE";
+    loadMarket();
+    return;
+  }
+  try {
+    await liff.init({liffId});
+    if(!liff.isLoggedIn()) { liff.login({redirectUri:location.href}); return; }
+    let profile=null;
+    if(state.sessionToken) {
+      try { profile=await apiRequest("/api/me"); }
+      catch { state.sessionToken="";sessionStorage.removeItem("stockWatcherSessionToken"); }
+    }
+    if(!profile) {
+      const idToken=liff.getIDToken();
+      if(!idToken)throw new Error("ไม่พบ LINE ID Token กรุณาเปิดผ่าน LIFF แล้วเข้าสู่ระบบใหม่");
+      const auth=await apiRequest("/api/auth/line",{method:"POST",body:JSON.stringify({idToken})});
+      state.sessionToken=auth.token;sessionStorage.setItem("stockWatcherSessionToken",auth.token);
+      profile={user:auth.user,symbols:auth.symbols};
+    }
+    state.user=profile.user||null;state.symbols=profile.symbols||[];
+    state.shared=true;renderWatchlist();
+    $("#accountStatus").textContent="เข้าสู่ระบบแล้ว"+(state.user?.displayName?" · "+state.user.displayName:"")+" · Watchlist เดียวกับ LINE";
+    setStatus("เชื่อมต่อบัญชี LINE และ Watchlist กลางแล้ว",true);
+    loadMarket();
+  } catch(e) {
+    state.shared=false;setStatus("เชื่อมต่อ LINE ไม่สำเร็จ");
+    $("#accountStatus").textContent="เข้าสู่ระบบไม่สำเร็จ: "+e.message;
+    loadMarket();
+  }
+}
+async function removeSymbol(symbol) {
+  if(!state.shared){setStatus("กรุณาเข้าสู่ระบบ LINE เพื่อแก้ไข Watchlist กลาง");return;}
+  try { const result=await apiRequest("/api/watchlist/remove",{method:"POST",body:JSON.stringify({symbol})});state.symbols=result.symbols||[];renderWatchlist();loadMarket(); }
+  catch(e){setStatus("ลบหุ้นไม่สำเร็จ: "+e.message);}
+}
 function renderIdeas(){
   const root=$("#ideas");
   root.innerHTML=SCREENER_SYMBOLS.map(s=>'<button class="idea-chip" type="button" data-idea="'+s+'">'+s+' <small>เพิ่ม</small></button>').join("");
@@ -163,7 +213,7 @@ function renderIdeas(){
 async function fetchMarket(symbols,timeframe=state.timeframe){
   const result={};
   for(let i=0;i<symbols.length;i+=20){
-    const batch=symbols.slice(i,i+20);
+    const batch=symbols.slice(i,i+50);
     const url=state.apiUrl.replace(/\/$/,"")+"/api/market?symbols="+encodeURIComponent(batch.join(","))+"&timeframe="+encodeURIComponent(timeframe);
     const response=await fetch(url,{cache:"no-store"});
     const data=await response.json();
@@ -196,13 +246,18 @@ async function loadMarket(){
   }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#cards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p><small>ตรวจ Worker URL, CORS และ Secrets ใน Cloudflare</small></article>';}
   finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
 }
-function addSymbol(symbol){
+async function addSymbol(symbol){
   symbol=String(symbol||"").trim().toUpperCase();
   if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
+  if(!state.shared){setStatus("กรุณาเข้าสู่ระบบ LINE ก่อนเพิ่มหุ้นใน Watchlist กลาง");return;}
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
-  state.symbols.push(symbol);saveSymbols();renderWatchlist();
-  $("#searchResults").innerHTML="";$("#stockSearch").value="";
-  loadMarket();
+  if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นต่อคนแล้ว");return;}
+  try {
+    const result=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
+    state.symbols=result.symbols||[];renderWatchlist();
+    $("#searchResults").innerHTML="";$("#stockSearch").value="";
+    loadMarket();
+  } catch(e){setStatus("เพิ่มหุ้นไม่สำเร็จ: "+e.message);}
 }
 async function searchAssets(){
   const q=$("#stockSearch").value.trim();if(!q)return;
@@ -216,7 +271,7 @@ async function searchAssets(){
 }
 async function runScreener(){
   const btn=$("#runScreener"),root=$("#screenerResults");
-  btn.disabled=true;btn.textContent="กำลังคัดกรอง…";root.textContent="กำลังคัดกรองหุ้น 20 ตัวในชุดติดตาม · กรอบเวลา "+(state.timeframe==="4Hour"?"4 ชั่วโมง":"รายวัน");
+  btn.disabled=true;btn.textContent="กำลังคัดกรอง…";root.textContent="กำลังคัดกรองหุ้น "+SCREENER_SYMBOLS.length+" ตัว · กรอบเวลา "+(state.timeframe==="4Hour"?"4 ชั่วโมง":"รายวัน");
   try{
     const symbols=[...new Set(SCREENER_SYMBOLS)];
     const data=await fetchMarket(symbols);
@@ -244,7 +299,7 @@ $("#searchResults").addEventListener("click",e=>{const b=e.target.closest("[data
 $("#ideas").addEventListener("click",e=>{const b=e.target.closest("[data-idea]");if(b)addSymbol(b.dataset.idea);});
 $("#cards").addEventListener("click",e=>{
   const b=e.target.closest("[data-remove]");if(!b)return;
-  state.symbols=state.symbols.filter(s=>s!==b.dataset.remove);saveSymbols();renderWatchlist();loadMarket();
+  removeSymbol(b.dataset.remove);
 });
 $("#runScreener").addEventListener("click",runScreener);
 $("#screenerResults").addEventListener("click",e=>{const b=e.target.closest("[data-screener-add]");if(b)addSymbol(b.dataset.screenerAdd);});
@@ -253,4 +308,4 @@ $("#enableAlerts").addEventListener("click",async()=>{
   const permission=await Notification.requestPermission();
   setStatus(permission==="granted"?"เปิดการแจ้งเตือนแล้ว":"ยังไม่ได้อนุญาตการแจ้งเตือน",permission==="granted");
 });
-renderIdeas();renderWatchlist();loadMarket();
+renderIdeas();renderWatchlist();initializeAccount();
