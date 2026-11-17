@@ -30,12 +30,13 @@ Keep existing secrets:
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LINE_CHANNEL_SECRET`
 
-Add Worker secrets:
+Add Worker secret:
 - `APP_SESSION_SECRET`: random string at least 32 characters (use a password manager / password generator).
+
+Add Worker variable:
 - `LINE_LOGIN_CHANNEL_ID`: Channel ID of a LINE Login channel (not the Messaging API channel ID).
 
-Add variable:
-- `LIFF_ID`: LIFF ID created under that LINE Login channel (public value).
+The public `LIFF_ID` is placed in `index.html` only; it is not a Worker secret or a Worker variable.
 
 Do not paste any secret into GitHub, this chat, or frontend files.
 
@@ -46,7 +47,7 @@ In LINE Developers, under the same Provider as the Messaging API channel:
 3. Add a LIFF app to that LINE Login channel.
 4. LIFF endpoint URL: `https://bombbomb725-debug.github.io/Ai-stock-watcher/`
 5. Enable `openid` and `profile` scopes; add the website URL as an allowed endpoint.
-6. Copy the LIFF ID into Worker variable `LIFF_ID` and into `window.AI_STOCK_WATCHER_CONFIG.LIFF_ID` in `index.html`.
+6. Copy the LIFF ID into `window.AI_STOCK_WATCHER_CONFIG.LIFF_ID` in `index.html`.
 7. Deploy Worker and website. Open the website from the LIFF app or tap Login.
 
 The existing Messaging API channel is not itself a LINE Login channel. Do not reuse its channel ID as LINE_LOGIN_CHANNEL_ID.
