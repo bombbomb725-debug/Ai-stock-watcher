@@ -124,6 +124,21 @@ export default {
       }
 
       const barsData = await barsResponse.json();
+      const returnedBars = barsData.bars || {};
+      const barCounts = Object.fromEntries(
+        symbols.map((symbol) => [symbol, Array.isArray(returnedBars[symbol]) ? returnedBars[symbol].length : 0])
+      );
+      const diagnostics = {
+        barsHttpStatus: barsResponse.status,
+        requestedStart: start.toISOString(),
+        requestedEnd: end.toISOString(),
+        requestedSymbols: symbols,
+        returnedSymbols: Object.keys(returnedBars),
+        barCounts,
+        hasNextPageToken: Boolean(barsData.next_page_token),
+        responseKeys: Object.keys(barsData),
+      };
+      console.log("Alpaca bars diagnostics", JSON.stringify(diagnostics));
       const stocks = {};
 
       for (let i = 0; i < symbols.length; i++) {
@@ -144,6 +159,7 @@ export default {
       return json({
         feed: "Alpaca IEX",
         fetchedAt: new Date().toISOString(),
+        diagnostics,
         stocks,
       }, 200, headers);
     } catch (error) {
