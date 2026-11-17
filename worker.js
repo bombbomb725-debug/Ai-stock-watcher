@@ -72,16 +72,18 @@ export default {
     const requested = (url.searchParams.get("symbols") || DEFAULT_SYMBOLS.join(","))
       .split(",").map(s => s.trim().toUpperCase()).filter(validSymbol);
     const symbols = [...new Set(requested)];
+    const requestedTimeframe=(url.searchParams.get("timeframe")||"1Day").toLowerCase();
+    const timeframe=requestedTimeframe==="4hour"?"4Hour":"1Day";
     if (!symbols.length) return json({ error: "No supported symbols requested" }, 400, headers);
     if (symbols.length > 20) return json({ error: "Maximum 20 symbols per request", max: 20 }, 400, headers);
 
     try {
       const base = "https://data.alpaca.markets/v2";
       const end = new Date();
-      const start = new Date(end.getTime() - 140 * 24 * 60 * 60 * 1000);
+      const start = new Date(end.getTime() - (timeframe==="4Hour"?45:140) * 24 * 60 * 60 * 1000);
       const barsUrl = new URL(base + "/stocks/bars");
       barsUrl.searchParams.set("symbols", symbols.join(","));
-      barsUrl.searchParams.set("timeframe", "1Day");
+      barsUrl.searchParams.set("timeframe", timeframe);
       barsUrl.searchParams.set("start", start.toISOString());
       barsUrl.searchParams.set("end", end.toISOString());
       barsUrl.searchParams.set("limit", "1000");
@@ -111,6 +113,7 @@ export default {
       const barCounts = Object.fromEntries(symbols.map(s => [s, stocks[s].bars.length]));
       return json({
         feed: "Alpaca IEX",
+        timeframe,
         fetchedAt: new Date().toISOString(),
         diagnostics: {
           barsHttpStatus: barsResponse.status,
