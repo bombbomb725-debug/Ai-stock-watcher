@@ -63,21 +63,40 @@ function macdData(values){
   const macd=line[line.length-1];
   return {line:macd,signal,hist:macd-signal};
 }
+function completedBars(bars){
+  if(!bars.length)return [];
+  const last=bars[bars.length-1];
+  const date=last.t?new Date(last.t):null;
+  if(!date)return bars;
+  const fmtDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+  return fmtDate(date)===fmtDate(new Date())?bars.slice(0,-1):bars;
+}
 function analyze(bars,price){
-  const closes=bars.map(b=>Number(b.c)).filter(Number.isFinite);
-  if(closes.length<50)return {signal:"ข้อมูลย้อนหลังไม่พอ",kind:"wait",score:0,short:null,long:null,rsi:null,macd:null};
+  const done=completedBars(bars);
+  const closes=done.map(b=>Number(b.c)).filter(Number.isFinite);
+  if(closes.length<55)return {signal:"ข้อมูลย้อนหลังไม่พอ",kind:"wait",score:0,short:null,long:null,rsi:null,macd:null,confirmed:false,strong:false};
   const short=ema(closes,20),long=ema(closes,50),momentum=rsi(closes),m=macdData(closes);
-  let score=0;
-  if(Number.isFinite(price)&&price>short)score++;
-  if(short>long)score++;
-  if(momentum>=50&&momentum<70)score++;
-  if(m&&m.line>m.signal)score++;
-  if(m&&m.hist>0)score++;
-  let signal="รอติดตาม",kind="wait";
-  if(momentum>=75){signal="ระวังไล่ราคา";kind="risk";}
-  else if(score>=4){signal="เข้าเงื่อนไขสะสม";kind="buy";}
-  else if(score<=1){signal="ระวังแรงขาย";kind="risk";}
-  return {short,long,rsi:momentum,macd:m?.line??null,macdSignal:m?.signal??null,score,signal,kind};
+  const e20s=emaSeries(closes,20),e50s=emaSeries(closes,50);
+  const rising20=e20s.at(-1)>e20s.at(-6),rising50=e50s.at(-1)>e50s.at(-6);
+  const lastClose=closes.at(-1);
+  const trend=short>long&&rising20&&rising50&&lastClose>short;
+  const momentumOK=momentum>=50&&momentum<70&&m&&m.line>m.signal&&m.hist>0;
+  const confirmed=Boolean(trend&&momentumOK);
+  const prior=done.slice(-21,-1);
+  const priorHigh=prior.length?Math.max(...prior.map(b=>Number(b.h)).filter(Number.isFinite)):null;
+  const lastVolume=Number(done.at(-1)?.v);
+  const avgVolume=done.slice(-21,-1).map(b=>Number(b.v)).filter(Number.isFinite);
+  const volumeAvg=avgVolume.length?avgVolume.reduce((x,y)=>x+y,0)/avgVolume.length:0;
+  const breakout=Number.isFinite(price)&&Number.isFinite(priorHigh)&&price>priorHigh;
+  const volumeOK=volumeAvg>0&&lastVolume>=volumeAvg*1.3;
+  const strong=confirmed&&breakout&&volumeOK;
+  const score=[trend,momentumOK,breakout,volumeOK,Boolean(m&&m.hist>0)].filter(Boolean).length;
+  let signal="รอการยืนยันแนวโน้ม",kind="wait";
+  if(strong){signal="ขาขึ้นยืนยัน + เบรกเอาต์";kind="buy";}
+  else if(confirmed){signal="BUY SIGNAL · แนวโน้มขาขึ้น";kind="buy";}
+  else if(momentum<45||(!trend&&Number.isFinite(price)&&price<short&&short<long)){signal="แนวโน้มยังอ่อน";kind="risk";}
+  else if(Number.isFinite(price)&&price>short&&!trend){signal="เริ่มฟื้นตัว · รอยืนยัน";kind="wait";}
+  return {short,long,rsi:momentum,macd:m?.line??null,macdSignal:m?.signal??null,score,signal,kind,confirmed,strong,lastClose,priorHigh,breakout,volumeOK};
 }
 function atrValue(bars,period=14){
   if(bars.length<period+1)return null;
@@ -99,23 +118,24 @@ function chartSvg(bars){
   return '<div class="chart-wrap"><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคาปิด</span><span>EMA20</span><span>EMA50</span></div></div>';
 }
 function entryPlan(bars,a){
-  const atr=atrValue(bars),e20=a.short;
+  const done=completedBars(bars),atr=atrValue(done),e20=a.short;
   if(!Number.isFinite(atr)||!Number.isFinite(e20))return null;
-  const lows=bars.slice(-20).map(b=>Number(b.l)).filter(Number.isFinite);
-  const highs=bars.slice(-20).map(b=>Number(b.h)).filter(Number.isFinite);
+  const lows=done.slice(-20).map(b=>Number(b.l)).filter(Number.isFinite);
   const support=lows.length?Math.min(...lows):e20-atr;
-  const resistance=highs.length?Math.max(...highs):e20+atr;
-  const low=Math.max(support,e20-.5*atr),high=e20+.25*atr;
-  return {low:Math.min(low,high),high,target:resistance,stop:Math.min(low,high)-atr};
+  const low=Math.max(e20-.35*atr,e20*.985);
+  const high=e20+.15*atr;
+  const stop=Math.min(support,e20-1.2*atr);
+  const risk=Math.max(high-stop,atr*.5);
+  return {low,high,stop,target:high+2*risk};
 }
 function renderCard(symbol,item){
   const bars=item.bars||[],price=Number(item.trade?.p),a=analyze(bars,price),plan=entryPlan(bars,a);
   const prev=bars.length>1?Number(bars[bars.length-2].c):NaN;
   const change=Number.isFinite(price)&&Number.isFinite(prev)&&prev!==0?(price-prev)/prev*100:null;
   const cls=change===null?"neutral":change>=0?"positive":"negative";
-  const planHtml=plan?'<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอ (EMA20 + ATR)</div><div class="entry-range">$'+fmt(plan.low)+' – $'+fmt(plan.high)+'</div><div class="entry-levels"><span>แนวต้าน 20 วัน <b>$'+fmt(plan.target)+'</b></span><span>จุดเตือนความเสี่ยง <b>$'+fmt(plan.stop)+'</b></span></div><small>เป็นระดับประเมินจากข้อมูลย้อนหลัง ไม่ใช่คำสั่งซื้อขาย</small></section>':'';
+  const planHtml=plan?'<section class="entry-plan"><div class="entry-title">โซนรอซื้อเมื่อย่อใกล้ EMA20</div><div class="entry-range">$'+fmt(plan.low)+' – $'+fmt(plan.high)+'</div><div class="entry-levels"><span>เป้าหมาย 2R <b>$'+fmt(plan.target)+'</b></span><span>จุดตัดขาดทุน <b>$'+fmt(plan.stop)+'</b></span></div><small>รอราคาย่อตัวในโซนนี้หลังแนวโน้มยืนยัน ไม่ใช่ราคาต่ำสุด และไม่ควรไล่ซื้อเมื่อราคาวิ่งห่าง EMA20</small></section>':'';
   const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH"):"ไม่พบรายการซื้อขายล่าสุด";
-  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span><button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button></div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+chartSvg(bars)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · IEX</div></article>';
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span><button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button></div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+chartSvg(bars)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · ใช้แท่งรายวันที่ปิดแล้ว · IEX</div></article>';
 }
 function setStatus(msg,ok=false){
   $("#connection").textContent=msg;
@@ -143,10 +163,10 @@ async function fetchMarket(symbols){
 function maybeNotify(symbol,item){
   if(!("Notification" in window)||Notification.permission!=="granted")return;
   const price=Number(item.trade?.p),a=analyze(item.bars||[],price);
-  if(a.score<4||a.rsi>=70)return;
+  if(!a.confirmed)return;
   const day=new Date().toISOString().slice(0,10),key="stockWatcherAlert_"+symbol;
   if(localStorage.getItem(key)===day)return;
-  new Notification("AI Stock Watcher: "+symbol,{body:"เข้าเงื่อนไขสะสมเบื้องต้น · คะแนน "+a.score+"/5 · ราคา "+(Number.isFinite(price)?"$"+fmt(price):"ไม่ทราบ")});
+  new Notification("AI Stock Watcher: "+symbol,{body:"ยืนยันแนวโน้มขาขึ้น · คะแนน "+a.score+"/5 · ราคา "+(Number.isFinite(price)?"$"+fmt(price):"ไม่ทราบ")});
   localStorage.setItem(key,day);
 }
 async function loadMarket(){
