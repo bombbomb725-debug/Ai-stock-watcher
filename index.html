@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0b1220">
-  <meta name="description" content="ติดตาม ASTS, RKLB, IONQ และ OKLO พร้อมตัวชี้วัดทางเทคนิค">
+  <meta name="description" content="AI Stock Watcher: Watchlist, technical indicators and stock screener">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
@@ -18,25 +18,40 @@
   <main>
     <section class="intro">
       <div><span class="live-dot"></span><span id="connection">กำลังเตรียมระบบ</span></div>
-      <p>ติดตามหุ้นสหรัฐฯ ได้สูงสุด 20 ตัว · ปรับรายการได้เอง</p>
+      <p>ติดตามหุ้นสหรัฐฯ ได้ตามต้องการ · เพิ่มและลบหุ้นได้เอง</p>
       <small id="updated">ยังไม่มีข้อมูลราคา</small>
+      <div class="alert-actions"><button id="enableAlerts" type="button">เปิดการแจ้งเตือน</button><small>แจ้งเตือนเมื่อหุ้นเข้าเงื่อนไขสะสม ขณะเปิดหน้าเว็บ</small></div>
     </section>
-    <section class="panel watch-tools"><div class="watch-heading"><h2>จัดการหุ้นที่ติดตาม</h2><small id="watchlist">กำลังติดตาม 4 หุ้น</small></div><div class="search-row"><input id="stockSearch" type="search" placeholder="ค้นหาชื่อหุ้นหรือ Ticker เช่น NVDA, PLTR"><button id="addStock" type="button">เพิ่มหุ้น</button></div><div id="searchResults" class="search-results"></div><h3>หุ้นที่น่าสนใจให้ค้นต่อ</h3><p>รายการไอเดียสำหรับศึกษา ไม่ใช่การจัดอันดับหรือคำแนะนำซื้อ</p><div id="ideas" class="ideas"></div></section>\n    <section id="cards" class="cards" aria-live="polite">
-      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
-      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
-      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
+
+    <section class="panel watch-tools">
+      <div class="watch-heading"><h2>จัดการหุ้นที่ติดตาม</h2><small id="watchlist">กำลังติดตาม 4 หุ้น</small></div>
+      <div class="search-row"><input id="stockSearch" type="search" placeholder="ค้นหาชื่อหุ้นหรือ Ticker เช่น NVDA, PLTR"><button id="addStock" type="button">ค้นหา</button></div>
+      <div id="searchResults" class="search-results"></div>
+      <h3>หุ้นตัวอย่าง</h3>
+      <p>แตะเพื่อเพิ่มหุ้นเข้ารายการติดตาม</p>
+      <div id="ideas" class="ideas"></div>
+    </section>
+
+    <section class="panel screener-panel">
+      <div class="watch-heading"><div><h2>AI Stock Screener</h2><p>จัดอันดับหุ้นตัวอย่างด้วย EMA20/50, RSI14 และ MACD</p></div><button id="runScreener" type="button">เริ่มคัดกรองหุ้น</button></div>
+      <div id="screenerResults" class="screener-results">กดเริ่มคัดกรองเพื่อจัดอันดับหุ้น</div>
+      <small>คะแนนเป็นตัวกรองทางเทคนิคจากข้อมูลย้อนหลัง ไม่ใช่การรับประกันผลตอบแทนหรือคำแนะนำซื้อขาย</small>
+    </section>
+
+    <section id="cards" class="cards" aria-live="polite">
       <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
     </section>
+
     <section class="settings panel">
       <div><h2>เชื่อมต่อข้อมูลตลาด</h2><p>ใส่ URL ของ Cloudflare Worker ที่คุณ deploy แล้ว</p></div>
       <label for="apiUrl">Worker API URL</label>
       <div class="url-row"><input id="apiUrl" type="url" placeholder="https://ชื่อ-worker.workers.dev"><button id="saveUrl" type="button">บันทึก</button></div>
-      <small>ระบบนี้ใช้ Alpaca IEX feed ซึ่งอาจไม่ครอบคลุมทุกตลาดซื้อขายและอาจมีความล่าช้า</small>
+      <small>ระบบใช้ Alpaca IEX feed ซึ่งอาจไม่ครอบคลุมทุกตลาดและราคาอาจล่าช้า</small>
     </section>
     <section class="panel guide">
       <h2>วิธีอ่านสัญญาณ</h2>
-      <div class="legend"><span class="signal buy">แนวโน้มบวก</span><span class="signal wait">รอติดตาม</span><span class="signal risk">ระวังแรงขาย</span></div>
-      <p>ประเมินจาก EMA20/50, RSI14 และ MACD เป็นเพียงตัวกรองทางเทคนิค ไม่ใช่คำสั่งซื้อขายหรือคำแนะนำการลงทุน</p>
+      <div class="legend"><span class="signal buy">เข้าเงื่อนไขสะสม</span><span class="signal wait">รอติดตาม</span><span class="signal risk">ระวังแรงขาย</span></div>
+      <p>คะแนน 4–5 จาก 5 คือเข้าเงื่อนไขเบื้องต้น โดยพิจารณาราคาเทียบ EMA20, EMA20 เทียบ EMA50, RSI14 และ MACD</p>
     </section>
   </main>
   <footer>ข้อมูลเพื่อการศึกษา · ตรวจสอบราคากับโบรกเกอร์ก่อนตัดสินใจ</footer>
