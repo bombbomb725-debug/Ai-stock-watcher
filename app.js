@@ -118,6 +118,7 @@ function chartSvg(bars){
   return '<div class="chart-wrap"><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคาปิด</span><span>EMA20</span><span>EMA50</span></div></div>';
 }
 function entryPlan(bars,a){
+  if(!a.confirmed)return null;
   const done=completedBars(bars),atr=atrValue(done),e20=a.short;
   if(!Number.isFinite(atr)||!Number.isFinite(e20))return null;
   const lows=done.slice(-20).map(b=>Number(b.l)).filter(Number.isFinite);
