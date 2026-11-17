@@ -58,6 +58,10 @@ async function handleLineWebhook(request, env) {
     } else if (event.type === "message" && event.message && event.message.type === "text") {
       message = "ได้รับข้อความแล้วครับ AI Stock Watcher เชื่อมต่อ LINE สำเร็จ";
     }
+    // During setup, return the LINE user ID in the bot reply so it can be saved as a Worker secret.
+    if (message && userId && !env.LINE_USER_ID) {
+      message += "\\n\\nLINE User ID (สำหรับตั้งค่าระบบ):\\n" + userId;
+    }
     if (message) {
       try {
         const reply = await fetch("https://api.line.me/v2/bot/message/reply", {
