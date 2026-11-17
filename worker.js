@@ -19,11 +19,78 @@ function json(data, status = 200, headers = {}) {
 }
 function validSymbol(s) { return /^[A-Z][A-Z0-9.]{0,9}$/.test(s); }
 
+async function verifyLineSignature(rawBody, signature, channelSecret) {
+  if (!signature || !channelSecret) return false;
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw", encoder.encode(channelSecret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const digest = await crypto.subtle.sign("HMAC", key, rawBody);
+  const bytes = new Uint8Array(digest);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary) === signature;
+}
+async function handleLineWebhook(request, env) {
+  if (!env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
+    return json({ error: "LINE secrets are missing" }, 503);
+  }
+  const rawBody = await request.arrayBuffer();
+  const signature = request.headers.get("x-line-signature") || "";
+  const valid = await verifyLineSignature(rawBody, signature, env.LINE_CHANNEL_SECRET);
+  if (!valid) return json({ error: "Invalid LINE signature" }, 401);
+
+  let payload;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(rawBody));
+  } catch {
+    return json({ error: "Invalid JSON" }, 400);
+  }
+
+  for (const event of (payload.events || [])) {
+    const userId = event.source && event.source.userId;
+    if (userId) console.log("LINE_USER_ID_CAPTURE", userId);
+
+    if (!event.replyToken || event.replyToken === "00000000000000000000000000000000") continue;
+    let message = null;
+    if (event.type === "follow") {
+      message = "เชื่อมต่อ AI Stock Watcher สำเร็จแล้วครับ ระบบกำลังเตรียมแจ้งเตือนหุ้นให้คุณ";
+    } else if (event.type === "message" && event.message && event.message.type === "text") {
+      message = "ได้รับข้อความแล้วครับ AI Stock Watcher เชื่อมต่อ LINE สำเร็จ";
+    }
+    if (message) {
+      try {
+        const reply = await fetch("https://api.line.me/v2/bot/message/reply", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + env.LINE_CHANNEL_ACCESS_TOKEN,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            replyToken: event.replyToken,
+            messages: [{ type: "text", text: message }]
+          })
+        });
+        if (!reply.ok) console.error("LINE_REPLY_FAILED", reply.status, (await reply.text()).slice(0, 300));
+      } catch (e) {
+        console.error("LINE_REPLY_ERROR", String(e).slice(0, 200));
+      }
+    }
+  }
+  return json({ ok: true });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin") || "";
     const headers = corsHeaders(origin);
+
+    // LINE sends server-to-server POST requests; handle before browser/API method checks.
+    if (url.pathname === "/line/webhook") {
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      return handleLineWebhook(request, env);
+    }
 
     if (request.method === "OPTIONS") {
       if (origin && !ALLOWED_ORIGINS.has(origin)) return json({ error: "Origin not allowed", origin }, 403, headers);
