@@ -93,8 +93,15 @@ export default {
       const barsUrl = new URL(alpacaBase + "/stocks/bars");
       barsUrl.searchParams.set("symbols", symbols.join(","));
       barsUrl.searchParams.set("timeframe", "1Day");
-      barsUrl.searchParams.set("limit", "100");
+      // Alpaca defaults the bars window to today only. Request enough history
+      // for the dashboard's EMA/RSI/MACD calculations.
+      const end = new Date();
+      const start = new Date(end.getTime() - 120 * 24 * 60 * 60 * 1000);
+      barsUrl.searchParams.set("start", start.toISOString());
+      barsUrl.searchParams.set("end", end.toISOString());
+      barsUrl.searchParams.set("limit", "1000");
       barsUrl.searchParams.set("feed", "iex");
+      barsUrl.searchParams.set("sort", "asc");
       barsUrl.searchParams.set("adjustment", "raw");
 
       const [barsResponse, ...tradeResponses] = await Promise.all([
