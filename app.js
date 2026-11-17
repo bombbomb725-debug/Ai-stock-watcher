@@ -1,10 +1,11 @@
 const DEFAULT_SYMBOLS = ["ASTS", "RKLB", "IONQ", "OKLO"];
-const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO"];
+const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR"];
 const NAMES = {
   ASTS:"AST SpaceMobile",RKLB:"Rocket Lab",IONQ:"IonQ",OKLO:"Oklo",
   NVDA:"NVIDIA",AMD:"Advanced Micro Devices",TSLA:"Tesla",PLTR:"Palantir",
   SOFI:"SoFi Technologies",AVGO:"Broadcom",HOOD:"Robinhood",SMR:"NuScale Power",
-  JOBY:"Joby Aviation",ACHR:"Archer Aviation"
+  JOBY:"Joby Aviation",ACHR:"Archer Aviation",MSFT:"Microsoft",AMZN:"Amazon",
+  META:"Meta Platforms",ARM:"Arm Holdings",COIN:"Coinbase",LUNR:"Intuitive Machines"
 };
 const $ = s => document.querySelector(s);
 const fmt = n => Number.isFinite(n) ? n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
@@ -66,7 +67,10 @@ function macdData(values){
 }
 function completedBars(bars,timeframe="1Day"){
   if(!bars.length)return [];
-  if(timeframe==="4Hour")return bars.slice(0,-1);
+  if(timeframe==="4Hour"){
+    const last=bars[bars.length-1],start=last.t?new Date(last.t).getTime():NaN;
+    return Number.isFinite(start)&&start+4*60*60*1000>Date.now()?bars.slice(0,-1):bars;
+  }
   const last=bars[bars.length-1];
   const date=last.t?new Date(last.t):null;
   if(!date)return bars;
@@ -143,7 +147,7 @@ function renderCard(symbol,item){
   const decisionHtml='<section class="decision '+decision.tone+'"><div class="decision-heading"><span>สรุปง่ายๆ</span><b>'+decision.label+'</b></div><p>'+decision.detail+'</p></section>';
   const planHtml=plan?`<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อเมื่อกลับตัวเป็นขาขึ้น</div><div class="entry-range">$${fmt(plan.low)} – $${fmt(plan.high)}</div><div class="entry-levels"><span>เป้าหมาย 2R <b>$${fmt(plan.target)}</b></span><span>จุดตัดขาดทุน <b>$${fmt(plan.stop)}</b></span></div><small>${a.confirmed?'แนวโน้มผ่านเงื่อนไขแล้ว รอราคาเข้ามาในโซนนี้ ไม่ไล่ซื้อ':'ระดับประมาณการล่วงหน้า ยังไม่ใช่สัญญาณซื้อ รอให้สถานะเป็นสีเขียวก่อน'}</small></section>`:"";
   const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH"):"ไม่พบรายการซื้อขายล่าสุด";
-  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span><button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button></div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(bars)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · ใช้แท่งรายวันที่ปิดแล้ว · IEX</div></article>';
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span><button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button></div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(bars)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · ใช้แท่ง '+ (state.timeframe==="4Hour"?"4 ชั่วโมงที่ปิดแล้ว":"รายวันที่ปิดแล้ว") +' · IEX</div></article>';
 }
 function setStatus(msg,ok=false){
   $("#connection").textContent=msg;
@@ -212,7 +216,7 @@ async function searchAssets(){
 }
 async function runScreener(){
   const btn=$("#runScreener"),root=$("#screenerResults");
-  btn.disabled=true;btn.textContent="กำลังคัดกรอง…";root.textContent="กำลังดึงข้อมูลหุ้นตัวอย่างและคำนวณตัวชี้วัด";
+  btn.disabled=true;btn.textContent="กำลังคัดกรอง…";root.textContent="กำลังคัดกรองหุ้น 20 ตัวในชุดติดตาม · กรอบเวลา "+(state.timeframe==="4Hour"?"4 ชั่วโมง":"รายวัน");
   try{
     const symbols=[...new Set(SCREENER_SYMBOLS)];
     const data=await fetchMarket(symbols);
@@ -223,7 +227,7 @@ async function runScreener(){
     }).filter(Boolean).sort((x,y)=>y.a.score-x.a.score);
     root.innerHTML=ranked.map((x,i)=>'<div class="rank-row"><b>#'+(i+1)+' '+x.symbol+'</b><span class="signal '+x.a.kind+'">'+x.a.signal+'</span><span>'+x.a.score+'/5</span><button type="button" data-screener-add="'+x.symbol+'">เพิ่มในรายการ</button></div>').join("")||"ไม่มีข้อมูลสำหรับคัดกรอง";
   }catch(e){root.textContent="คัดกรองไม่สำเร็จ: "+e.message;}
-  finally{btn.disabled=false;btn.textContent="เริ่มคัดกรองหุ้น";}
+  finally{btn.disabled=false;btn.textContent="คัดกรองอีกครั้ง";}
 }
 $("#apiUrl").value=state.apiUrl;
 $("#refresh").addEventListener("click",loadMarket);
