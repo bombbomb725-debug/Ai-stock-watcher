@@ -10,3 +10,8 @@ crons = ["*/15 * * * *"]
 
 # D1 binding DB must be added in Cloudflare Dashboard after creating ai-stock-watcher-db.
 # Add binding: Variable name DB -> your D1 database.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-stock-watcher-db"
+database_id = "d170efdb-f51b-4f43-a8c8-949d236c8ae3"
