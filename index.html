@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="description" content="ติดตาม ASTS, RKLB, IONQ และ OKLO พร้อมตัวชี้วัดทางเทคนิค">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <title>AI Stock Watcher</title>
+</head>
+<body>
+  <header class="topbar">
+    <div><div class="eyebrow">PERSONAL MARKET MONITOR</div><h1>AI Stock Watcher</h1></div>
+    <button id="refresh" class="refresh" type="button">↻ อัปเดต</button>
+  </header>
+  <main>
+    <section class="intro">
+      <div><span class="live-dot"></span><span id="connection">กำลังเตรียมระบบ</span></div>
+      <p>ติดตามหุ้น ASTS · RKLB · IONQ · OKLO</p>
+      <small id="updated">ยังไม่มีข้อมูลราคา</small>
+    </section>
+    <section id="cards" class="cards" aria-live="polite">
+      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
+      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
+      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
+      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
+    </section>
+    <section class="settings panel">
+      <div><h2>เชื่อมต่อข้อมูลตลาด</h2><p>ใส่ URL ของ Cloudflare Worker ที่คุณ deploy แล้ว</p></div>
+      <label for="apiUrl">Worker API URL</label>
+      <div class="url-row"><input id="apiUrl" type="url" placeholder="https://ชื่อ-worker.workers.dev"><button id="saveUrl" type="button">บันทึก</button></div>
+      <small>ระบบนี้ใช้ Alpaca IEX feed ซึ่งอาจไม่ครอบคลุมทุกตลาดซื้อขายและอาจมีความล่าช้า</small>
+    </section>
+    <section class="panel guide">
+      <h2>วิธีอ่านสัญญาณ</h2>
+      <div class="legend"><span class="signal buy">แนวโน้มบวก</span><span class="signal wait">รอติดตาม</span><span class="signal risk">ระวังแรงขาย</span></div>
+      <p>ประเมินจาก EMA20/50, RSI14 และ MACD เป็นเพียงตัวกรองทางเทคนิค ไม่ใช่คำสั่งซื้อขายหรือคำแนะนำการลงทุน</p>
+    </section>
+  </main>
+  <footer>ข้อมูลเพื่อการศึกษา · ตรวจสอบราคากับโบรกเกอร์ก่อนตัดสินใจ</footer>
+  <script src="./app.js" defer></script>
+</body>
+</html>
