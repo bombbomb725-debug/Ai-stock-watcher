@@ -191,13 +191,23 @@ function analyzeStatus(bars,price) {
 async function scanAlerts(env) {
   if(!dbReady(env)||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
   const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol FROM watchlist w JOIN users u ON u.id=w.user_id ORDER BY u.id,w.symbol").all();
-  const watch=(rows.results||[]);if(!watch.length)return;
-  const symbols=[...new Set(watch.map(x=>x.symbol))],market={};
+  const watch=(rows.results||[]);
+  const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])],market={};
   for(let i=0;i<symbols.length;i+=50) {
     try { const d=await fetchMarket(env,symbols.slice(i,i+50));Object.assign(market,d.stocks); }
     catch(e){console.error("ALERT_SCAN_MARKET_ERROR",String(e));return;}
   }
   const checked=new Date().toISOString();
+  // Refresh the shared, transparent technical screener universe once per scheduled scan.
+  for(const symbol of [...new Set(SCREENER_SYMBOLS)]) {
+    const data=market[symbol];if(!data)continue;
+    const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
+    await env.DB.prepare(`INSERT INTO stock_ideas(symbol,score,status,rationale,scanned_at)
+      VALUES(?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET score=excluded.score,status=excluded.status,
+      rationale=excluded.rationale,scanned_at=excluded.scanned_at`)
+      .bind(symbol,signal.score,signal.status,signal.label,checked).run();
+  }
+  if(!watch.length)return;
   for(const item of watch) {
     const data=market[item.symbol];if(!data)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
