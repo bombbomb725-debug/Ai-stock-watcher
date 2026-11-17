@@ -212,7 +212,7 @@ function renderIdeas(){
 }
 async function fetchMarket(symbols,timeframe=state.timeframe){
   const result={};
-  for(let i=0;i<symbols.length;i+=20){
+  for(let i=0;i<symbols.length;i+=50){
     const batch=symbols.slice(i,i+50);
     const url=state.apiUrl.replace(/\/$/,"")+"/api/market?symbols="+encodeURIComponent(batch.join(","))+"&timeframe="+encodeURIComponent(timeframe);
     const response=await fetch(url,{cache:"no-store"});
