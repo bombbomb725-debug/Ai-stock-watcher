@@ -60,7 +60,7 @@ async function handleLineWebhook(request, env) {
     }
     // During setup, return the LINE user ID in the bot reply so it can be saved as a Worker secret.
     if (message && userId && !env.LINE_USER_ID) {
-      message += "\\n\\nLINE User ID (สำหรับตั้งค่าระบบ):\\n" + userId;
+      message += "\n\nLINE User ID (สำหรับตั้งค่าระบบ):\n" + userId;
     }
     if (message) {
       try {
