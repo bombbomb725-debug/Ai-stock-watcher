@@ -7,7 +7,7 @@
   <meta name="description" content="AI Stock Watcher: Watchlist, technical indicators and stock screener">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=20261117b">
+  <link rel="stylesheet" href="./styles.css?v=20261117c">
   <title>AI Stock Watcher</title>
 </head>
 <body>
@@ -50,11 +50,15 @@
     </section>
     <section class="panel guide">
       <h2>วิธีอ่านสัญญาณ</h2>
-      <div class="legend"><span class="signal buy">BUY SIGNAL · ขาขึ้นยืนยัน</span><span class="signal wait">เริ่มฟื้นตัว · รอยืนยัน</span><span class="signal risk">แนวโน้มยังอ่อน</span></div>
-      <p>BUY SIGNAL ต้องมีราคาปิดเหนือ EMA20, EMA20 อยู่เหนือ EMA50 และทั้งสองเส้นกำลังขึ้น พร้อม RSI/MACD สนับสนุน ส่วน STRONG BUY ต้องทะลุจุดสูง 20 วันและมีวอลุ่มยืนยัน โซนรอซื้อเป็นจุดรอเข้าหลังยืนยัน ไม่ใช่ราคาต่ำสุด</p>
+      <div class="decision-key">
+        <div class="key-row red"><b>🔴 สีแดง — อย่าเพิ่งซื้อ</b><span>แนวโน้มยังอ่อน ราคา/โมเมนตัมยังไม่สนับสนุน รอให้กลับตัวก่อน</span></div>
+        <div class="key-row yellow"><b>🟡 สีเหลือง — เตรียมซื้อ</b><span>เริ่มฟื้นตัว แต่เงื่อนไขยังไม่ครบ ยังไม่ใช่จังหวะซื้อ รอการยืนยัน</span></div>
+        <div class="key-row green"><b>🟢 สีเขียว — ซื้อได้</b><span>ผ่านเงื่อนไขขาขึ้นแล้ว ให้ดูโซนรอซื้อและจุดตัดขาดทุน อย่าไล่ราคา</span></div>
+      </div>
+      <p>ระบบใช้แท่งราคาวันที่ปิดแล้วตรวจสอบแนวโน้ม: ราคาปิดต้องอยู่เหนือ EMA20, EMA20 อยู่เหนือ EMA50 และเส้นค่าเฉลี่ยกำลังปรับขึ้น พร้อม RSI/MACD สนับสนุน จึงเป็นสีเขียว ส่วนการทะลุจุดสูง 20 วันพร้อมวอลุ่มจะเป็นสัญญาณที่แข็งแรงขึ้น โซนรอซื้อเป็นจุดรอเข้าหลังแนวโน้มยืนยัน ไม่ใช่ราคาต่ำสุด</p>
     </section>
   </main>
   <footer>ข้อมูลเพื่อการศึกษา · ตรวจสอบราคากับโบรกเกอร์ก่อนตัดสินใจ</footer>
-  <script src="./app.js?v=20261117c" defer></script>
+  <script src="./app.js?v=20261117d" defer></script>
 </body>
 </html>
