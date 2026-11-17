@@ -1,123 +1,222 @@
-const DEFAULT_SYMBOLS=["ASTS","RKLB","IONQ","OKLO"];
-const IDEAS=["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR"];
-const NAMES={ASTS:"AST SpaceMobile",RKLB:"Rocket Lab",IONQ:"IonQ",OKLO:"Oklo",NVDA:"NVIDIA",AMD:"Advanced Micro Devices",TSLA:"Tesla",PLTR:"Palantir",SOFI:"SoFi Technologies",AVGO:"Broadcom",HOOD:"Robinhood",SMR:"NuScale Power",JOBY:"Joby Aviation",ACHR:"Archer Aviation"};
-const $=s=>document.querySelector(s);
-const fmt=n=>Number.isFinite(n)?n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}):"—";
-const state={busy:false,symbols:JSON.parse(localStorage.getItem("stockWatcherSymbols")||"null")||DEFAULT_SYMBOLS,assets:[]};
-function saveSymbols(){localStorage.setItem("stockWatcherSymbols",JSON.stringify(state.symbols))}
-function ema(values,period){if(values.length<period)return null;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;for(let i=period;i<values.length;i++)v=values[i]*k+v*(1-k);return v}
-function rsi(values,period=14){if(values.length<=period)return null;let gains=0,losses=0;for(let i=values.length-period;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)gains+=d;else losses-=d}if(losses===0)return 100;const rs=(gains/period)/(losses/period);return 100-100/(1+rs)}
-function macd(values){const e12=ema(values,12),e26=ema(values,26);return e12===null||e26===null?null:e12-e26}
-function analyze(bars,price){const closes=bars.map(x=>Number(x.c)).filter(Number.isFinite);if(closes.length<30)return {short:null,long:null,rsi:null,macd:null,signal:"ข้อมูลไม่พอ",kind:"wait",score:0};const short=ema(closes,20),long=ema(closes,50),momentum=rsi(closes),m=macd(closes);let score=0;if(short!==null&&price>short)score++;if(short!==null&&long!==null&&short>long)score++;if(momentum!==null&&momentum>=50&&momentum<70)score++;if(m!==null&&m>0)score++;if(momentum!==null&&momentum>75)return {short,long,rsi:momentum,macd:m,signal:"ระวังไล่ราคา",kind:"risk",score};if(score>=3)return {short,long,rsi:momentum,macd:m,signal:"แนวโน้มบวก",kind:"buy",score};if(score<=1)return {short,long,rsi:momentum,macd:m,signal:"ระวังแรงขาย",kind:"risk",score};return {short,long,rsi:momentum,macd:m,signal:"รอติดตาม",kind:"wait",score}}
-function emaSeries(values,period){const out=Array(values.length).fill(null);if(values.length<period)return out;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;out[period-1]=v;for(let i=period;i<values.length;i++){v=values[i]*k+v*(1-k);out[i]=v}return out}
-function atrValue(bars,period=14){if(bars.length<period+1)return null;const trs=[];for(let i=1;i<bars.length;i++){const h=Number(bars[i].h),l=Number(bars[i].l),pc=Number(bars[i-1].c);if([h,l,pc].every(Number.isFinite))trs.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)))}return trs.length>=period?trs.slice(-period).reduce((a,b)=>a+b,0)/period:null}
-function chartSvg(bars){const rows=bars.slice(-60),cl=rows.map(b=>Number(b.c)),e20=emaSeries(cl,20),e50=emaSeries(cl,50);const vals=[...cl,...e20.filter(Number.isFinite),...e50.filter(Number.isFinite)];if(vals.length<2)return '<div class="chart-empty">ข้อมูลกราฟยังไม่เพียงพอ</div>';let lo=Math.min(...vals),hi=Math.max(...vals),pad=(hi-lo)*.12||1;lo-=pad;hi+=pad;const X=i=>30+i*(560/Math.max(1,rows.length-1)),Y=v=>12+(hi-v)/(hi-lo)*156;const path=a=>a.map((v,i)=>Number.isFinite(v)?(i&&Number.isFinite(a[i-1])?"L":"M")+X(i).toFixed(1)+","+Y(v).toFixed(1):"").join(" ");const last=cl.length-1;return '<div class="chart-wrap"><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคาปิดพร้อม EMA 20 และ EMA 50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span><i class="dot-price"></i> ราคาปิด</span><span><i class="dot-ema20"></i> EMA 20</span><span><i class="dot-ema50"></i> EMA 50</span></div></div>'}
-function entryPlan(bars,analysis){const atr=atrValue(bars),ema20=analysis.short;if(!Number.isFinite(atr)||!Number.isFinite(ema20))return null;const recent=bars.slice(-20),support=Math.min(...recent.map(b=>Number(b.l)).filter(Number.isFinite)),resistance=Math.max(...recent.map(b=>Number(b.h)).filter(Number.isFinite));let low=Math.max(Number.isFinite(support)?support:ema20-atr,ema20-.5*atr),high=ema20+.25*atr;if(low>high)low=ema20-.5*atr;return {low,high,target:resistance,stop:low-atr,atr}}
-function renderCard(symbol,item){const trade=item.trade||{},bars=item.bars||[];const price=Number(trade.p);const prev=bars.length>1?Number(bars[bars.length-2].c):NaN;const change=Number.isFinite(price)&&Number.isFinite(prev)&&prev!==0?(price-prev)/prev*100:null;const a=analyze(bars,price),plan=entryPlan(bars,a);const cls=change===null?"neutral":change>=0?"positive":"negative";const time=trade.t?new Date(trade.t).toLocaleString("th-TH"):"ไม่ระบุเวลา";const planHtml=plan?'<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อ (ประเมินจาก EMA20 + ATR)</div><div class="entry-range">$'+fmt(plan.low)+' – $'+fmt(plan.high)+'</div><div class="entry-levels"><span>แนวต้าน 20 วัน <b>$'+fmt(plan.target)+'</b></span><span>จุดเตือนความเสี่ยง <b>$'+fmt(plan.stop)+'</b></span></div><small>ไม่ใช่ราคาซื้อที่รับประกัน ควรรอแท่งราคายืนยันและแบ่งไม้เข้าซื้อ</small></section>':'<section class="entry-plan"><small>ข้อมูลย้อนหลังยังไม่พอคำนวณโซนเข้าซื้อ</small></section>';return `<article class="stock-card"><div class="stock-head"><div><div class="symbol">${symbol}</div><div class="company">${NAMES[symbol]||item.name||"หุ้นสหรัฐฯ"}</div></div><div class="card-actions"><span class="signal ${a.kind}">${a.signal}</span><button class="remove-stock" data-remove="${symbol}" aria-label="ลบ ${symbol}">×</button></div></div><div class="price">${Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคา"}</div><div class="change ${cls}">${change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า"}</div>${chartSvg(bars)}<div class="metrics"><div class="metric"><span>EMA 20 / 50</span><b>${fmt(a.short)} / ${fmt(a.long)}</b></div><div class="metric"><span>RSI 14</span><b>${fmt(a.rsi)}</b></div><div class="metric"><span>MACD</span><b>${fmt(a.macd)}</b></div></div>${planHtml}<div class="card-foot">เวลาซื้อขายล่าสุด: ${time} · Feed: IEX · คะแนน ${a.score}/4</div></article>`}
-
-
-const DEFAULT_API_URL="https://ai-stock-watcher-api.bombbomb725.workers.dev";
-const apiInput=$("#apiUrl");
-const cards=$("#cards");
-const connection=$("#connection");
-const updated=$("#updated");
-const watchlist=$("#watchlist");
-let apiUrl=localStorage.getItem("stockWatcherApiUrl")||DEFAULT_API_URL;
-apiInput.value=apiUrl;
-
-function setStatus(message,ok=false){
-  connection.textContent=message;
+const DEFAULT_SYMBOLS = ["ASTS", "RKLB", "IONQ", "OKLO"];
+const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO"];
+const NAMES = {
+  ASTS:"AST SpaceMobile",RKLB:"Rocket Lab",IONQ:"IonQ",OKLO:"Oklo",
+  NVDA:"NVIDIA",AMD:"Advanced Micro Devices",TSLA:"Tesla",PLTR:"Palantir",
+  SOFI:"SoFi Technologies",AVGO:"Broadcom",HOOD:"Robinhood",SMR:"NuScale Power",
+  JOBY:"Joby Aviation",ACHR:"Archer Aviation"
+};
+const $ = s => document.querySelector(s);
+const fmt = n => Number.isFinite(n) ? n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
+const state = {
+  busy:false,
+  symbols:loadSavedSymbols(),
+  assets:[],
+  market:{},
+  apiUrl:localStorage.getItem("stockWatcherApiUrl") || "https://ai-stock-watcher-api.bombbomb725.workers.dev"
+};
+function loadSavedSymbols(){
+  try {
+    const saved = JSON.parse(localStorage.getItem("stockWatcherSymbols") || "null");
+    return Array.isArray(saved) ? [...new Set(saved.filter(s=>typeof s==="string" && /^[A-Z][A-Z0-9.]{0,9}$/.test(s))) ] : [...DEFAULT_SYMBOLS];
+  } catch { return [...DEFAULT_SYMBOLS]; }
+}
+function saveSymbols(){ localStorage.setItem("stockWatcherSymbols",JSON.stringify(state.symbols)); }
+function ema(values,period){
+  if(values.length<period)return null;
+  const k=2/(period+1);
+  let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<values.length;i++)v=values[i]*k+v*(1-k);
+  return v;
+}
+function emaSeries(values,period){
+  const out=Array(values.length).fill(null);
+  if(values.length<period)return out;
+  const k=2/(period+1);
+  let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  out[period-1]=v;
+  for(let i=period;i<values.length;i++){v=values[i]*k+v*(1-k);out[i]=v;}
+  return out;
+}
+function rsi(values,period=14){
+  if(values.length<=period)return null;
+  let gain=0,loss=0;
+  for(let i=1;i<=period;i++){const d=values[i]-values[i-1];if(d>0)gain+=d;else loss-=d;}
+  let avgGain=gain/period,avgLoss=loss/period;
+  for(let i=period+1;i<values.length;i++){
+    const d=values[i]-values[i-1];
+    avgGain=(avgGain*(period-1)+Math.max(d,0))/period;
+    avgLoss=(avgLoss*(period-1)+Math.max(-d,0))/period;
+  }
+  if(avgLoss===0)return 100;
+  const rs=avgGain/avgLoss;
+  return 100-100/(1+rs);
+}
+function macdData(values){
+  if(values.length<35)return null;
+  const e12=emaSeries(values,12),e26=emaSeries(values,26);
+  const line=values.map((_,i)=>e12[i]!==null&&e26[i]!==null?e12[i]-e26[i]:null);
+  const valid=line.filter(Number.isFinite);
+  if(valid.length<9)return null;
+  const signalValid=emaSeries(valid,9);
+  const signal=signalValid[signalValid.length-1];
+  const macd=line[line.length-1];
+  return {line:macd,signal,hist:macd-signal};
+}
+function analyze(bars,price){
+  const closes=bars.map(b=>Number(b.c)).filter(Number.isFinite);
+  if(closes.length<50)return {signal:"ข้อมูลย้อนหลังไม่พอ",kind:"wait",score:0,short:null,long:null,rsi:null,macd:null};
+  const short=ema(closes,20),long=ema(closes,50),momentum=rsi(closes),m=macdData(closes);
+  let score=0;
+  if(Number.isFinite(price)&&price>short)score++;
+  if(short>long)score++;
+  if(momentum>=50&&momentum<70)score++;
+  if(m&&m.line>m.signal)score++;
+  if(m&&m.hist>0)score++;
+  let signal="รอติดตาม",kind="wait";
+  if(momentum>=75){signal="ระวังไล่ราคา";kind="risk";}
+  else if(score>=4){signal="เข้าเงื่อนไขสะสม";kind="buy";}
+  else if(score<=1){signal="ระวังแรงขาย";kind="risk";}
+  return {short,long,rsi:momentum,macd:m?.line??null,macdSignal:m?.signal??null,score,signal,kind};
+}
+function atrValue(bars,period=14){
+  if(bars.length<period+1)return null;
+  const tr=[];
+  for(let i=1;i<bars.length;i++){
+    const h=Number(bars[i].h),l=Number(bars[i].l),pc=Number(bars[i-1].c);
+    if([h,l,pc].every(Number.isFinite))tr.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
+  }
+  return tr.length>=period?tr.slice(-period).reduce((a,b)=>a+b,0)/period:null;
+}
+function chartSvg(bars){
+  const rows=bars.slice(-60),cl=rows.map(b=>Number(b.c)),e20=emaSeries(cl,20),e50=emaSeries(cl,50);
+  const vals=[...cl,...e20.filter(Number.isFinite),...e50.filter(Number.isFinite)];
+  if(vals.length<2)return '<div class="chart-empty">ข้อมูลกราฟยังไม่เพียงพอ</div>';
+  let lo=Math.min(...vals),hi=Math.max(...vals),pad=(hi-lo)*.12||1;lo-=pad;hi+=pad;
+  const X=i=>30+i*(560/Math.max(1,rows.length-1)),Y=v=>12+(hi-v)/(hi-lo)*156;
+  const path=a=>a.map((v,i)=>Number.isFinite(v)?(i&&Number.isFinite(a[i-1])?"L":"M")+X(i).toFixed(1)+","+Y(v).toFixed(1):"").join(" ");
+  const last=cl.length-1;
+  return '<div class="chart-wrap"><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคาปิด</span><span>EMA20</span><span>EMA50</span></div></div>';
+}
+function entryPlan(bars,a){
+  const atr=atrValue(bars),e20=a.short;
+  if(!Number.isFinite(atr)||!Number.isFinite(e20))return null;
+  const lows=bars.slice(-20).map(b=>Number(b.l)).filter(Number.isFinite);
+  const highs=bars.slice(-20).map(b=>Number(b.h)).filter(Number.isFinite);
+  const support=lows.length?Math.min(...lows):e20-atr;
+  const resistance=highs.length?Math.max(...highs):e20+atr;
+  const low=Math.max(support,e20-.5*atr),high=e20+.25*atr;
+  return {low:Math.min(low,high),high,target:resistance,stop:Math.min(low,high)-atr};
+}
+function renderCard(symbol,item){
+  const bars=item.bars||[],price=Number(item.trade?.p),a=analyze(bars,price),plan=entryPlan(bars,a);
+  const prev=bars.length>1?Number(bars[bars.length-2].c):NaN;
+  const change=Number.isFinite(price)&&Number.isFinite(prev)&&prev!==0?(price-prev)/prev*100:null;
+  const cls=change===null?"neutral":change>=0?"positive":"negative";
+  const planHtml=plan?'<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอ (EMA20 + ATR)</div><div class="entry-range">$'+fmt(plan.low)+' – $'+fmt(plan.high)+'</div><div class="entry-levels"><span>แนวต้าน 20 วัน <b>$'+fmt(plan.target)+'</b></span><span>จุดเตือนความเสี่ยง <b>$'+fmt(plan.stop)+'</b></span></div><small>เป็นระดับประเมินจากข้อมูลย้อนหลัง ไม่ใช่คำสั่งซื้อขาย</small></section>':'';
+  const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH"):"ไม่พบรายการซื้อขายล่าสุด";
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span><button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button></div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+chartSvg(bars)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · IEX</div></article>';
+}
+function setStatus(msg,ok=false){
+  $("#connection").textContent=msg;
   const dot=document.querySelector(".live-dot");
   if(dot)dot.style.background=ok?"#3bd69b":"#f5c96a";
 }
+function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function renderWatchlist(){ $("#watchlist").textContent="กำลังติดตาม "+state.symbols.length+" หุ้น"; }
 function renderIdeas(){
   const root=$("#ideas");
-  root.innerHTML=IDEAS.map(s=>'<button class="idea-chip" type="button" data-idea="'+s+'">'+s+' <small>เพิ่ม</small></button>').join("");
+  root.innerHTML=SCREENER_SYMBOLS.map(s=>'<button class="idea-chip" type="button" data-idea="'+s+'">'+s+' <small>เพิ่ม</small></button>').join("");
 }
-function renderWatchlist(){
-  watchlist.textContent="กำลังติดตาม "+state.symbols.length+" หุ้น";
-}
-function renderError(message){
-  cards.innerHTML='<article class="stock-card"><b>โหลดข้อมูลไม่สำเร็จ</b><p>'+String(message).replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]))+'</p><small>ตรวจสอบ Worker URL และการ Deploy แล้วกดอัปเดตอีกครั้ง</small></article>';
-}
-async function loadMarket(){
-  if(state.busy)return;
-  state.busy=true;
-  $("#refresh").disabled=true;
-  $("#refresh").textContent="กำลังโหลด…";
-  setStatus("กำลังดึงข้อมูลตลาด");
-  try{
-    if(!state.symbols.length)throw new Error("กรุณาเพิ่มหุ้นอย่างน้อย 1 ตัว");
-    const url=apiUrl.replace(/\/$/,"")+"/api/market?symbols="+encodeURIComponent(state.symbols.join(","));
+async function fetchMarket(symbols){
+  const result={};
+  for(let i=0;i<symbols.length;i+=20){
+    const batch=symbols.slice(i,i+20);
+    const url=state.apiUrl.replace(/\/$/,"")+"/api/market?symbols="+encodeURIComponent(batch.join(","));
     const response=await fetch(url,{cache:"no-store"});
     const data=await response.json();
     if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
-    if(!data.stocks)throw new Error("รูปแบบข้อมูลจาก Worker ไม่ถูกต้อง");
-    const html=state.symbols.map(symbol=>{
-      const item=data.stocks[symbol];
-      return item?renderCard(symbol,item):'<article class="stock-card"><b>'+symbol+'</b><p>ไม่พบข้อมูลหุ้นนี้จาก IEX</p></article>';
-    }).join("");
-    cards.innerHTML=html;
-    const counts=data.diagnostics?.barCounts||{};
-    const total=Object.values(counts).reduce((a,b)=>a+(Number(b)||0),0);
-    setStatus("เชื่อมต่อแล้ว · "+(data.feed||"Market data"),true);
-    updated.textContent="อัปเดต "+new Date(data.fetchedAt||Date.now()).toLocaleString("th-TH")+" · แท่งราคาย้อนหลัง "+total+" แท่ง";
-  }catch(error){
-    setStatus("เชื่อมต่อข้อมูลไม่สำเร็จ");
-    renderError(error.message||error);
-  }finally{
-    state.busy=false;
-    $("#refresh").disabled=false;
-    $("#refresh").textContent="↻ อัปเดต";
+    Object.assign(result,data.stocks||{});
   }
+  return result;
+}
+function maybeNotify(symbol,item){
+  if(!("Notification" in window)||Notification.permission!=="granted")return;
+  const price=Number(item.trade?.p),a=analyze(item.bars||[],price);
+  if(a.score<4||a.rsi>=70)return;
+  const day=new Date().toISOString().slice(0,10),key="stockWatcherAlert_"+symbol;
+  if(localStorage.getItem(key)===day)return;
+  new Notification("AI Stock Watcher: "+symbol,{body:"เข้าเงื่อนไขสะสมเบื้องต้น · คะแนน "+a.score+"/5 · ราคา "+(Number.isFinite(price)?"$"+fmt(price):"ไม่ทราบ")});
+  localStorage.setItem(key,day);
+}
+async function loadMarket(){
+  if(state.busy)return;
+  state.busy=true;$("#refresh").disabled=true;$("#refresh").textContent="กำลังโหลด…";
+  setStatus("กำลังดึงข้อมูลตลาด");
+  try{
+    if(!state.symbols.length){$("#cards").innerHTML='<article class="stock-card">ยังไม่มีหุ้นใน Watchlist ค้นหาและเพิ่มหุ้นได้ด้านบน</article>';return;}
+    state.market=await fetchMarket(state.symbols);
+    $("#cards").innerHTML=state.symbols.map(s=>state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+s+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>').join("");
+    state.symbols.forEach(s=>{if(state.market[s])maybeNotify(s,state.market[s]);});
+    const count=Object.values(state.market).reduce((n,x)=>n+(x.bars||[]).length,0);
+    setStatus("เชื่อมต่อแล้ว · Alpaca IEX",true);
+    $("#updated").textContent="อัปเดต "+new Date().toLocaleString("th-TH")+" · ข้อมูลย้อนหลัง "+count+" แท่ง";
+  }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#cards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p><small>ตรวจ Worker URL, CORS และ Secrets ใน Cloudflare</small></article>';}
+  finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
 }
 function addSymbol(symbol){
   symbol=String(symbol||"").trim().toUpperCase();
-  if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol))return;
+  if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
-  if(state.symbols.length>=20){setStatus("ติดตามได้สูงสุด 20 หุ้น");return;}
-  state.symbols.push(symbol);
-  saveSymbols();
-  renderWatchlist();
-  $("#searchResults").innerHTML="";
-  $("#stockSearch").value="";
+  state.symbols.push(symbol);saveSymbols();renderWatchlist();
+  $("#searchResults").innerHTML="";$("#stockSearch").value="";
   loadMarket();
 }
 async function searchAssets(){
-  const q=$("#stockSearch").value.trim();
-  if(!q)return;
-  const results=$("#searchResults");
-  results.textContent="กำลังค้นหา…";
+  const q=$("#stockSearch").value.trim();if(!q)return;
+  const root=$("#searchResults");root.textContent="กำลังค้นหา…";
   try{
-    const response=await fetch(apiUrl.replace(/\/$/,"")+"/api/assets?q="+encodeURIComponent(q),{cache:"no-store"});
-    const data=await response.json();
-    if(!response.ok)throw new Error(data.error||"ค้นหาไม่สำเร็จ");
+    const response=await fetch(state.apiUrl.replace(/\/$/,"")+"/api/assets?q="+encodeURIComponent(q),{cache:"no-store"});
+    const data=await response.json();if(!response.ok)throw new Error(data.error||"ค้นหาไม่สำเร็จ");
     state.assets=data.assets||[];
-    results.innerHTML=state.assets.length?state.assets.map(a=>'<button class="search-result" type="button" data-symbol="'+a.symbol+'"><b>'+a.symbol+'</b><span>'+String(a.name||"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]))+'</span><small>เพิ่ม +</small></button>').join(""):"ไม่พบหุ้นที่ตรงกัน";
-  }catch(error){results.textContent="ค้นหาไม่สำเร็จ: "+error.message;}
+    root.innerHTML=state.assets.length?state.assets.map(a=>'<button class="search-result" type="button" data-symbol="'+escapeHtml(a.symbol)+'"><b>'+escapeHtml(a.symbol)+'</b><span>'+escapeHtml(a.name)+'</span><small>เพิ่ม +</small></button>').join(""):"ไม่พบหุ้นที่ตรงกัน";
+  }catch(e){root.textContent="ค้นหาไม่สำเร็จ: "+e.message;}
 }
+async function runScreener(){
+  const btn=$("#runScreener"),root=$("#screenerResults");
+  btn.disabled=true;btn.textContent="กำลังคัดกรอง…";root.textContent="กำลังดึงข้อมูลหุ้นตัวอย่างและคำนวณตัวชี้วัด";
+  try{
+    const symbols=[...new Set(SCREENER_SYMBOLS)];
+    const data=await fetchMarket(symbols);
+    const ranked=symbols.map(symbol=>{
+      const item=data[symbol];if(!item)return null;
+      const a=analyze(item.bars||[],Number(item.trade?.p));
+      return {symbol,item,a};
+    }).filter(Boolean).sort((x,y)=>y.a.score-x.a.score);
+    root.innerHTML=ranked.map((x,i)=>'<div class="rank-row"><b>#'+(i+1)+' '+x.symbol+'</b><span class="signal '+x.a.kind+'">'+x.a.signal+'</span><span>'+x.a.score+'/5</span><button type="button" data-screener-add="'+x.symbol+'">เพิ่มในรายการ</button></div>').join("")||"ไม่มีข้อมูลสำหรับคัดกรอง";
+  }catch(e){root.textContent="คัดกรองไม่สำเร็จ: "+e.message;}
+  finally{btn.disabled=false;btn.textContent="เริ่มคัดกรองหุ้น";}
+}
+$("#apiUrl").value=state.apiUrl;
 $("#refresh").addEventListener("click",loadMarket);
 $("#saveUrl").addEventListener("click",()=>{
-  const value=apiInput.value.trim().replace(/\/$/,"");
-  try{new URL(value);apiUrl=value;localStorage.setItem("stockWatcherApiUrl",apiUrl);setStatus("บันทึก Worker URL แล้ว",true);loadMarket();}
+  const value=$("#apiUrl").value.trim().replace(/\/$/,"");
+  try{new URL(value);state.apiUrl=value;localStorage.setItem("stockWatcherApiUrl",value);setStatus("บันทึก Worker URL แล้ว",true);loadMarket();}
   catch{setStatus("Worker URL ไม่ถูกต้อง");}
 });
 $("#addStock").addEventListener("click",searchAssets);
 $("#stockSearch").addEventListener("keydown",e=>{if(e.key==="Enter")searchAssets();});
-$("#searchResults").addEventListener("click",e=>{
-  const button=e.target.closest("[data-symbol]");
-  if(button)addSymbol(button.dataset.symbol);
-});
-$("#ideas").addEventListener("click",e=>{
-  const button=e.target.closest("[data-idea]");
-  if(button)addSymbol(button.dataset.idea);
-});
+$("#searchResults").addEventListener("click",e=>{const b=e.target.closest("[data-symbol]");if(b)addSymbol(b.dataset.symbol);});
+$("#ideas").addEventListener("click",e=>{const b=e.target.closest("[data-idea]");if(b)addSymbol(b.dataset.idea);});
 $("#cards").addEventListener("click",e=>{
-  const button=e.target.closest("[data-remove]");
-  if(!button)return;
-  state.symbols=state.symbols.filter(s=>s!==button.dataset.remove);
-  saveSymbols();renderWatchlist();loadMarket();
+  const b=e.target.closest("[data-remove]");if(!b)return;
+  state.symbols=state.symbols.filter(s=>s!==b.dataset.remove);saveSymbols();renderWatchlist();loadMarket();
 });
-renderIdeas();
-renderWatchlist();
-loadMarket();
+$("#runScreener").addEventListener("click",runScreener);
+$("#screenerResults").addEventListener("click",e=>{const b=e.target.closest("[data-screener-add]");if(b)addSymbol(b.dataset.screenerAdd);});
+$("#enableAlerts").addEventListener("click",async()=>{
+  if(!("Notification" in window)){setStatus("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");return;}
+  const permission=await Notification.requestPermission();
+  setStatus(permission==="granted"?"เปิดการแจ้งเตือนแล้ว":"ยังไม่ได้อนุญาตการแจ้งเตือน",permission==="granted");
+});
+renderIdeas();renderWatchlist();loadMarket();
