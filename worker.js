@@ -1,5 +1,5 @@
 const DEFAULT_SYMBOLS = ["ASTS", "RKLB", "IONQ", "OKLO"];
-const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR","LUNR","RDDT","MSTR","TEM","RGTI","QBTS","QUBT","HIMS","CRSP","RXRX","RKLB","LUNR","SPCE","ACHR","JOBY","ASTS","OKLO","IONQ","PLTR","APP","ORCL","CRM","NOW","PANW","CRWD","NET","SNOW","MU","TSM","ANET","GEV","CEG","VST","CCJ","LEU","UUUU","ONDS","LUNR","RDW","RKLB","SMR","NNE","QS","ENVX","ASTS","BBAI","SOUN","AI","PATH","AFRM","UPST","HOOD","COIN","MARA","HUT","CLSK","IBIT"];
+const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR","RDDT","MSTR","TEM","RGTI","QBTS","QUBT","HIMS","CRSP","RXRX","SPCE","APP","ORCL","CRM","NOW","PANW","CRWD","NET","SNOW","MU","TSM","ANET","GEV","CEG","VST","CCJ","LEU","UUUU","QS","ENVX","BBAI"];
 const MAX_WATCHLIST = 50;
 const ALLOWED_ORIGINS = new Set(["https://bombbomb725-debug.github.io"]);
 const encoder = new TextEncoder();
@@ -226,7 +226,10 @@ async function scanAlerts(env) {
     try {
       await linePush(env,item.line_user_id,message);
       await env.DB.prepare("INSERT INTO alert_events(user_id,symbol,old_status,new_status,message) VALUES(?,?,?,?,?)").bind(item.user_id,item.symbol,old.status,signal.status,message).run();
-    } catch(e) { console.error("LINE_PUSH_ERROR",item.symbol,String(e)); }
+    } catch(e) {
+      console.error("LINE_PUSH_ERROR",item.symbol,String(e));
+      await env.DB.prepare("UPDATE user_stock_state SET status=? WHERE user_id=? AND symbol=? AND status=?").bind(old.status,item.user_id,item.symbol,signal.status).run();
+    }
   }
 }
 async function apiHandler(request,env,url,headers) {
