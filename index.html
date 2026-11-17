@@ -19,8 +19,9 @@
     <section class="intro">
       <div><span class="live-dot"></span><span id="connection">กำลังเตรียมระบบ</span></div>
       <p>ติดตามหุ้นสหรัฐฯ ได้ตามต้องการ · เพิ่มและลบหุ้นได้เอง</p>
+      <div class="timeframe-row"><label for="timeframe">กรอบเวลาวิเคราะห์</label><select id="timeframe"><option value="1Day">รายวัน (1D)</option><option value="4Hour">4 ชั่วโมง (4H)</option></select><small>เปลี่ยนกรอบเวลาแล้วระบบจะดึงแท่งราคาใหม่และคำนวณสัญญาณใหม่</small></div>
       <small id="updated">ยังไม่มีข้อมูลราคา</small>
-      <div class="alert-actions"><button id="enableAlerts" type="button">เปิดการแจ้งเตือน</button><small>แจ้งเตือนเมื่อแนวโน้มขาขึ้นผ่านเงื่อนไข BUY SIGNAL ขณะเปิดหน้าเว็บ</small></div>
+      <div class="alert-actions"><button id="enableAlerts" type="button">เปิดการแจ้งเตือน</button><small>แจ้งเตือนในเบราว์เซอร์เมื่อแนวโน้มขาขึ้นผ่านเงื่อนไข BUY SIGNAL ขณะเปิดหน้าเว็บ</small></div>
     </section>
 
     <section class="panel watch-tools">
@@ -33,7 +34,7 @@
     </section>
 
     <section class="panel screener-panel">
-      <div class="watch-heading"><div><h2>AI Stock Screener</h2><p>คัดหุ้นที่แนวโน้มขาขึ้นเริ่มยืนยันด้วย EMA20/50, RSI14, MACD และวอลุ่ม</p></div><button id="runScreener" type="button">เริ่มคัดกรองหุ้น</button></div>
+      <div class="watch-heading"><div><h2>AI Stock Screener</h2><p>คัดกรองหุ้นในชุดติดตามตลาดที่กำหนดไว้ (ยังไม่ใช่ทุกหุ้นในตลาด) ด้วย EMA20/50, RSI14, MACD และวอลุ่ม</p></div><button id="runScreener" type="button">เริ่มคัดกรองหุ้น</button></div>
       <div id="screenerResults" class="screener-results">กดเริ่มคัดกรองเพื่อจัดอันดับหุ้น</div>
       <small>คะแนนเป็นตัวกรองทางเทคนิคจากข้อมูลย้อนหลัง ไม่ใช่การรับประกันผลตอบแทนหรือคำแนะนำซื้อขาย</small>
     </section>
