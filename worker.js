@@ -86,7 +86,7 @@ export default {
     const origin = request.headers.get("Origin") || "";
     const headers = corsHeaders(origin);
 
-    // LINE sends server-to-server POST requests; handle before browser/API method checks.
+    // LINE webhook endpoint: handle POST before all browser/API method checks. Keep this route public for LINE verification.
     if (url.pathname === "/line/webhook") {
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       return handleLineWebhook(request, env);
