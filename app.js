@@ -70,7 +70,7 @@ function macdData(values){
   const macd=line[line.length-1];
   return {line:macd,signal,hist:macd-signal};
 }
-function completedBars(bars,timeframe="1Day",timezone="America/New_York"){
+function completedBars(bars,timeframe="1Day"){
   if(!bars.length)return [];
   if(timeframe==="4Hour"){
     const last=bars[bars.length-1],start=last.t?new Date(last.t).getTime():NaN;
@@ -79,7 +79,7 @@ function completedBars(bars,timeframe="1Day",timezone="America/New_York"){
   const last=bars[bars.length-1];
   const date=last.t?new Date(last.t):null;
   if(!date)return bars;
-  const fmtDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+  const fmtDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
   return fmtDate(date)===fmtDate(new Date())?bars.slice(0,-1):bars;
 }
 function adxValue(bars,period=14) {
@@ -109,8 +109,8 @@ function adxValue(bars,period=14) {
   for(let i=period;i<dx.length;i++)value=(value*(period-1)+dx[i])/period;
   return value;
 }
-function analyze(bars,price,timeframe=state.timeframe,timezone="America/New_York"){
-  const done=completedBars(bars,timeframe,timezone);
+function analyze(bars,price,timeframe=state.timeframe){
+  const done=completedBars(bars,timeframe);
   const closes=done.map(b=>Number(b.c)).filter(Number.isFinite);
   if(closes.length<55)return {signal:"ข้อมูลย้อนหลังไม่พอ",kind:"wait",score:0,short:null,long:null,rsi:null,macd:null,confirmed:false,strong:false};
   const short=ema(closes,20),long=ema(closes,50),momentum=rsi(closes),m=macdData(closes),adx=adxValue(done);
@@ -154,8 +154,8 @@ function chartSvg(bars,livePrice){
   const last=cl.length-1;
   return '<div class="chart-wrap"><div class="chart-caption">กราฟระหว่างวัน · แท่ง 5 นาที · จุดปลายกราฟคือราคาซื้อขายล่าสุด</div><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคาปิด</span><span>EMA20</span><span>EMA50</span></div></div>';
 }
-function entryPlan(bars,a,timezone="America/New_York"){
-  const done=completedBars(bars,state.timeframe,timezone),atr=atrValue(done),e20=a.short;
+function entryPlan(bars,a){
+  const done=completedBars(bars,state.timeframe),atr=atrValue(done),e20=a.short;
   if(!Number.isFinite(atr)||!Number.isFinite(e20))return null;
   const lows=done.slice(-20).map(b=>Number(b.l)).filter(Number.isFinite);
   const support=lows.length?Math.min(...lows):e20-atr;
@@ -172,8 +172,7 @@ function renderThaiCard(symbol){
   return '<article class="stock-card thai-stock-card"><div class="stock-head"><div><div class="symbol">'+escapeHtml(ticker)+'</div><div class="company">หุ้นไทย · SET/mai</div></div><div class="card-actions"><span class="signal wait">กราฟเท่านั้น</span><button class="remove-stock" data-remove="'+escapeHtml(symbol)+'" aria-label="ลบ '+escapeHtml(ticker)+'">×</button></div></div><div class="decision yellow"><div class="decision-heading"><span>ข้อมูลที่มี</span><b>TradingView</b></div><p>แสดงกราฟเท่านั้น ยังไม่คำนวณสัญญาณหรือราคาเข้าซื้อ เพราะไม่มีข้อมูล OHLC ฟรีที่ยืนยันความถูกต้อง</p></div><div class="thai-chart-frame"><iframe loading="lazy" title="กราฟ '+escapeHtml(ticker)+'" src="'+chartUrl+'" referrerpolicy="no-referrer" allowtransparency="true"></iframe></div><div class="card-foot">ตลาดไทย · '+escapeHtml(ticker)+' · แหล่งกราฟ TradingView</div></article>';
 }
 function renderCard(symbol,item){
-  const thai=isThaiSymbol(symbol),currency=thai?"฿":"$";
-  const bars=item.bars||[],price=Number(item.trade?.p),a=analyze(bars,price,state.timeframe,thai?"Asia/Bangkok":"America/New_York");
+  const bars=item.bars||[],price=Number(item.trade?.p),a=analyze(bars,price);
   if(item.signal){
     a.kind=item.signal.status||a.kind;
     a.signal=item.signal.status_label||a.signal;
@@ -181,7 +180,7 @@ function renderCard(symbol,item){
     a.confirmed=a.kind==="buy";
     a.strong=String(a.signal).includes("เบรกเอาต์");
   }
-  const plan=entryPlan(bars,a,thai?"Asia/Bangkok":"America/New_York");
+  const plan=entryPlan(bars,a);
   const prev=bars.length>1?Number(bars[bars.length-2].c):NaN;
   const change=Number.isFinite(price)&&Number.isFinite(prev)&&prev!==0?(price-prev)/prev*100:null;
   const cls=change===null?"neutral":change>=0?"positive":"negative";
@@ -191,9 +190,9 @@ function renderCard(symbol,item){
     ? {label:"อย่าเพิ่งซื้อ",tone:"red",detail:"แนวโน้มยังอ่อนหรือโมเมนตัมไม่สนับสนุน รอให้สัญญาณกลับตัวก่อน"}
     : {label:"เตรียมซื้อ",tone:"yellow",detail:"เริ่มมีสัญญาณฟื้นตัวหรือยังยืนยันไม่ครบ รอดูแท่งวันถัดไปและเงื่อนไขให้ครบก่อน"};
   const decisionHtml='<section class="decision '+decision.tone+'"><div class="decision-heading"><span>สรุปง่ายๆ</span><b>'+decision.label+'</b></div><p>'+decision.detail+'</p></section>';
-  const planHtml=plan?`<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อเมื่อกลับตัวเป็นขาขึ้น</div><div class="entry-range">${currency}${fmt(plan.low)} – ${currency}${fmt(plan.high)}</div><div class="entry-levels"><span>เป้าหมาย 2R <b>${currency}${fmt(plan.target)}</b></span><span>จุดตัดขาดทุน <b>${currency}${fmt(plan.stop)}</b></span></div><small>${a.confirmed?'แนวโน้มผ่านเงื่อนไขแล้ว รอราคาเข้ามาในโซนนี้ ไม่ไล่ซื้อ':'ระดับประมาณการล่วงหน้า ยังไม่ใช่สัญญาณซื้อ รอให้สถานะเป็นสีเขียวก่อน'}</small></section>`:"";
+  const planHtml=plan?`<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อเมื่อกลับตัวเป็นขาขึ้น</div><div class="entry-range">$${fmt(plan.low)} – $${fmt(plan.high)}</div><div class="entry-levels"><span>เป้าหมาย 2R <b>$${fmt(plan.target)}</b></span><span>จุดตัดขาดทุน <b>$${fmt(plan.stop)}</b></span></div><small>${a.confirmed?'แนวโน้มผ่านเงื่อนไขแล้ว รอราคาเข้ามาในโซนนี้ ไม่ไล่ซื้อ':'ระดับประมาณการล่วงหน้า ยังไม่ใช่สัญญาณซื้อ รอให้สถานะเป็นสีเขียวก่อน'}</small></section>`:"";
   const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH"):"ไม่พบรายการซื้อขายล่าสุด";
-  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||(thai?"หุ้นไทย · SET/mai":"หุ้นสหรัฐฯ"))+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?currency+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div><div class="metric"><span>ADX14</span><b>'+fmt(a.adx)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · สถานะ/คะแนนอิงผลสแกน 1D '+(item.signal?.checked_at?new Date(item.signal.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอผลสแกน")+' · '+(thai?'Yahoo Finance (ไม่เป็นทางการ)':'Alpaca IEX')+'</div></article>';
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div><div class="metric"><span>ADX14</span><b>'+fmt(a.adx)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · สถานะ/คะแนนอิงผลสแกน 1D '+(item.signal?.checked_at?new Date(item.signal.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอผลสแกน")+' · IEX</div></article>';
 }
 function setStatus(msg,ok=false){
   $("#connection").textContent=msg;
@@ -369,8 +368,8 @@ function isUsRegularSession(){
   return v.weekday!=="Sat"&&v.weekday!=="Sun"&&minutes>=570&&minutes<960;
 }
 async function refreshIntradayBars(){
-  if((!isUsRegularSession()&&!isThaiRegularSession())||document.hidden||state.busy||state.intradayBusy||!Object.keys(state.market).length)return;
-  const symbols=Object.keys(state.market);
+  if(!isUsRegularSession()||document.hidden||state.busy||state.intradayBusy||!Object.keys(state.market).length)return;
+  const symbols=Object.keys(state.market).filter(s=>!isThaiSymbol(s));
   if(!symbols.length)return;
   state.intradayBusy=true;
   try{
@@ -380,33 +379,25 @@ async function refreshIntradayBars(){
       state.market[symbol].intradayBars=data[symbol].bars||state.market[symbol].intradayBars||[];
       if(data[symbol].trade)state.market[symbol].trade=data[symbol].trade;
     }
-    $("#cards").innerHTML=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])].map(s=>state.market[s]?renderCard(s,state.market[s]):"").join("");
+    $("#cards").innerHTML=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])].map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):"")).join("");
     $("#updated").textContent="อัปเดตกราฟระหว่างวัน "+new Date().toLocaleTimeString("th-TH")+" · แท่ง 5 นาที";
   }catch(e){console.warn("INTRADAY_BAR_REFRESH_FAILED",e);}
   finally{state.intradayBusy=false;}
 }
-function isThaiRegularSession(){
-  const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Bangkok",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());
-  const v=Object.fromEntries(parts.map(p=>[p.type,p.value])),m=Number(v.hour)*60+Number(v.minute);
-  return v.weekday!=="Sat"&&v.weekday!=="Sun"&&((m>=600&&m<750)||(m>=870&&m<1005));
-}
 async function refreshLiveQuotes(){
-  if(document.hidden||state.busy||!Object.keys(state.market).length)return;
-  const all=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])],us=all.filter(s=>!isThaiSymbol(s)),thai=all.filter(isThaiSymbol);
-  const useUS=isUsRegularSession()&&us.length>0,useThai=isThaiRegularSession()&&thai.length>0;
-  if(!useUS&&!useThai)return;
+  if(!isUsRegularSession()||document.hidden||state.busy||!Object.keys(state.market).length)return;
+  const symbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])].filter(s=>!isThaiSymbol(s));
+  if(!symbols.length)return;
   try{
-    const [data,thaiData,signals]=await Promise.all([
-      useUS?fetchLatestQuotes(us):Promise.resolve({trades:{}}),useThai?fetchMarket(thai,"5Min"):Promise.resolve({}),fetchSignals(all)
-    ]);
-    for(const symbol of all){
+    const [data,signals]=await Promise.all([fetchLatestQuotes(symbols),fetchSignals(symbols)]);
+    for(const symbol of symbols){
       if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
-      if(isThaiSymbol(symbol)){const td=thaiData[symbol];if(td&&state.market[symbol]){state.market[symbol].trade=td.trade;state.market[symbol].intradayBars=td.bars||[];}}
-      else {const trade=data.trades?.[symbol];if(trade&&state.market[symbol])state.market[symbol].trade=trade;}
+      const trade=data.trades?.[symbol];
+      if(trade&&state.market[symbol])state.market[symbol].trade=trade;
     }
-    $("#cards").innerHTML=all.map(s=>state.market[s]?renderCard(s,state.market[s]):"").join("");
-    $("#updated").textContent="อัปเดตตลาด "+new Date().toLocaleTimeString("th-TH")+" · หุ้นไทย Yahoo Finance / หุ้นสหรัฐฯ Alpaca";
-    setStatus("กำลังอัปเดตข้อมูลตลาดตามเวลาซื้อขาย",true);
+    $("#cards").innerHTML=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])].map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>')).join("");
+    $("#updated").textContent="อัปเดตราคาสด "+new Date().toLocaleTimeString("th-TH")+" · Alpaca IEX · รีเฟรชทุก 15 วินาทีขณะตลาดเปิด";
+    setStatus("ตลาดสหรัฐฯ เปิด · อัปเดตราคาสดอัตโนมัติ",true);
   }catch(e){console.warn("LIVE_QUOTE_REFRESH_FAILED",e);}
 }
 function maybeNotify(symbol,item){
@@ -425,16 +416,19 @@ async function loadMarket(){
   try{
     if(!state.symbols.length){$("#cards").innerHTML='<article class="stock-card">ยังไม่มีหุ้นใน Watchlist ค้นหาและเพิ่มหุ้นได้ด้านบน</article>';return;}
     const displaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
+    const usSymbols=displaySymbols.filter(s=>!isThaiSymbol(s)),thaiSymbols=displaySymbols.filter(isThaiSymbol);
     const [dailyMarket,intradayMarket,signals]=await Promise.all([
-      fetchMarket(displaySymbols,"1Day"),fetchMarket(displaySymbols,"5Min"),fetchSignals(displaySymbols)
+      usSymbols.length?fetchMarket(usSymbols,"1Day"):Promise.resolve({}),
+      usSymbols.length?fetchMarket(usSymbols,"5Min"):Promise.resolve({}),
+      usSymbols.length?fetchSignals(usSymbols):Promise.resolve({})
     ]);
     state.market=dailyMarket;
-    for(const symbol of displaySymbols)if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
-    for(const symbol of displaySymbols)if(state.market[symbol])state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
-    $("#cards").innerHTML=displaySymbols.map(s=>state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลตลาด</p></article>').join("");
-    state.symbols.forEach(s=>{if(state.market[s]&&!isThaiSymbol(s))maybeNotify(s,state.market[s]);});
+    for(const symbol of usSymbols)if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
+    for(const symbol of usSymbols)if(state.market[symbol])state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
+    $("#cards").innerHTML=displaySymbols.map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>')).join("");
+    state.symbols.filter(s=>!isThaiSymbol(s)).forEach(s=>{if(state.market[s])maybeNotify(s,state.market[s]);});
     const count=Object.values(state.market).reduce((n,x)=>n+(x.bars||[]).length,0);
-    setStatus(displaySymbols.some(isThaiSymbol)?"เชื่อมต่อแล้ว · หุ้นไทย Yahoo Finance (ไม่เป็นทางการ)":"เชื่อมต่อแล้ว · Alpaca IEX",true);
+    setStatus(thaiSymbols.length?(usSymbols.length?"เชื่อมต่อแล้ว · หุ้นไทยแสดงกราฟเท่านั้น":"หุ้นไทย · กราฟ TradingView เท่านั้น"):"เชื่อมต่อแล้ว · Alpaca IEX",true);
     $("#updated").textContent="อัปเดต "+new Date().toLocaleString("th-TH")+" · ข้อมูลย้อนหลัง "+count+" แท่ง";
   }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#cards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p><small>ตรวจ Worker URL, CORS และ Secrets ใน Cloudflare</small></article>';}
   finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
