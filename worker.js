@@ -376,15 +376,15 @@ async function linePush(env,userId,text) {
   if(!r.ok)throw new Error("LINE push failed "+r.status+" "+(await r.text()).slice(0,200));
 }
 function parseSymbols(value) {
-  const raw=String(value||"").trim().split(/[\\s,，;；]+/).filter(Boolean).map(cleanSymbol);
+  const raw=String(value||"").trim().split(/[\s,，;；]+/).filter(Boolean).map(cleanSymbol);
   if(!raw.length||raw.some(x=>!validSymbol(x)))return null;
   return [...new Set(raw)];
 }
 function parseLineCommand(text) {
   const t=String(text||"").trim();
-  let m=t.match(/^(?:เพิ่ม|add|\/add)\\s+(.+)$/i);
+  let m=t.match(/^(?:เพิ่ม|add|\/add)\s+(.+)$/i);
   if(m){const symbols=parseSymbols(m[1]);return symbols?{action:"add",symbols}:{action:"invalid_symbols"};}
-  m=t.match(/^(?:ลบ|remove|\/remove)\\s+(.+)$/i);
+  m=t.match(/^(?:ลบ|remove|\/remove)\s+(.+)$/i);
   if(m){const symbols=parseSymbols(m[1]);return symbols?{action:"remove",symbols}:{action:"invalid_symbols"};}
   m=t.match(/^(?:รายการหุ้น|รายชื่อหุ้น|ดูรายการหุ้น|ดูหุ้น|list|\/list)(?:\s+(\d+))?$/i); if(m)return {action:"list",page:Math.max(1,Number(m[1]||1))};
   m=t.match(/^(?:เชื่อม|link)\s+([A-Z2-9]{8,12})$/i); if(m)return {action:"link",code:m[1].toUpperCase()};
