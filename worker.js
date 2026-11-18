@@ -59,7 +59,7 @@ function randomPairCode() {
   return Array.from(data,b=>alphabet[b&31]).join("");
 }
 async function ensureLinkTable(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS web_link_sessions (token_hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL UNIQUE, user_id INTEGER, expires_at INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS web_link_sessions (token_hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL UNIQUE, user_id INTEGER, expires_at INTEGER NOT NULL, code_expires_at INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
 }
 async function authenticate(request,env) {
   const auth=request.headers.get("Authorization")||"";
@@ -188,11 +188,11 @@ async function handleLineWebhook(request,env) {
     const cmd=parseLineCommand(event.message.text);
     if(cmd.action==="link") {
       const codeHash=await sha256Hex(cmd.code),now=Math.floor(Date.now()/1000);
-      const pending=await env.DB.prepare("SELECT code_hash FROM web_link_sessions WHERE code_hash=? AND user_id IS NULL AND expires_at>?").bind(codeHash,now).first();
+      const pending=await env.DB.prepare("SELECT code_hash FROM web_link_sessions WHERE code_hash=? AND user_id IS NULL AND code_expires_at>?").bind(codeHash,now).first();
       if(!pending) {
         await lineReply(env,event.replyToken,"這組連接碼無效或已過期。請回到網站重新產生連接碼，再輸入「เชื่อม รหัส」");
       } else {
-        const linked=await env.DB.prepare("UPDATE web_link_sessions SET user_id=? WHERE code_hash=? AND user_id IS NULL AND expires_at>?").bind(user.id,codeHash,now).run();
+        const linked=await env.DB.prepare("UPDATE web_link_sessions SET user_id=? WHERE code_hash=? AND user_id IS NULL AND code_expires_at>?").bind(user.id,codeHash,now).run();
         if((linked.meta?.changes||0)>0)await lineReply(env,event.replyToken,"เชื่อมบัญชีสำเร็จแล้ว! เว็บนี้ใช้ Watchlist เดียวกับ LINE ของคุณได้แล้ว");
         else await lineReply(env,event.replyToken,"รหัสนี้ถูกใช้ไปแล้ว กรุณาสร้างรหัสใหม่จากเว็บไซต์");
       }
@@ -369,16 +369,16 @@ async function apiHandler(request,env,url,headers) {
   if(url.pathname==="/api/link/start"&&request.method==="POST") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
     await ensureLinkTable(env);
-    const token=randomToken(32),code=randomPairCode(),now=Math.floor(Date.now()/1000),expiresAt=now+600;
-    await env.DB.prepare("DELETE FROM web_link_sessions WHERE expires_at<=?").bind(now).run();
-    await env.DB.prepare("INSERT INTO web_link_sessions(token_hash,code_hash,expires_at) VALUES(?,?,?)").bind(await sha256Hex(token),await sha256Hex(code),expiresAt).run();
+    const token=randomToken(32),code=randomPairCode(),now=Math.floor(Date.now()/1000),expiresAt=now+600,sessionExpiresAt=now+86400*30;
+    await env.DB.prepare("DELETE FROM web_link_sessions WHERE expires_at<=? OR (user_id IS NULL AND code_expires_at<=?)").bind(now,now).run();
+    await env.DB.prepare("INSERT INTO web_link_sessions(token_hash,code_hash,expires_at,code_expires_at) VALUES(?,?,?,?)").bind(await sha256Hex(token),await sha256Hex(code),sessionExpiresAt,expiresAt).run();
     return json({token,code,expiresAt},200,headers);
   }
   if(url.pathname==="/api/link/status"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
     const auth=request.headers.get("Authorization")||"",token=auth.startsWith("Bearer ")?auth.slice(7):"";
     if(!token)return json({error:"Missing link token"},401,headers);
-    const row=await env.DB.prepare("SELECT s.user_id,u.display_name FROM web_link_sessions s LEFT JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?").bind(await sha256Hex(token),Math.floor(Date.now()/1000)).first();
+    const row=await env.DB.prepare("SELECT s.user_id,u.display_name FROM web_link_sessions s LEFT JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND ((s.user_id IS NULL AND s.code_expires_at>?) OR (s.user_id IS NOT NULL AND s.expires_at>?))").bind(await sha256Hex(token),Math.floor(Date.now()/1000),Math.floor(Date.now()/1000)).first();
     if(!row)return json({error:"รหัสเชื่อมเว็บหมดอายุ กรุณาสร้างรหัสใหม่"},401,headers);
     if(!row.user_id)return json({linked:false},200,headers);
     return json({linked:true,user:{displayName:row.display_name},symbols:await getWatchlist(env,row.user_id)},200,headers);
