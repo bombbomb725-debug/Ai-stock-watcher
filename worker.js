@@ -603,14 +603,14 @@ async function scanAlerts(env) {
   const watch=rows.results||[];
   const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
   const market={};
-  // Alpaca batch endpoints: at most 50 symbols per request, avoiding one request per ticker.
-  for(let i=0;i<symbols.length;i+=50) {
+  // Separate provider groups so a Thai-data outage never stops US stock scans.
+  const groups=[symbols.filter(s=>!isThaiSymbol(s)),symbols.filter(isThaiSymbol)].filter(group=>group.length);
+  for(const group of groups)for(let i=0;i<group.length;i+=50) {
     try {
-      const batch=await fetchMarket(env,symbols.slice(i,i+50));
+      const batch=await fetchMarket(env,group.slice(i,i+50));
       Object.assign(market,batch.stocks);
     } catch(e) {
-      console.error("ALERT_SCAN_MARKET_ERROR",String(e));
-      return;
+      console.error(isThaiSymbol(group[0])?"ALERT_SCAN_THAI_ERROR":"ALERT_SCAN_US_ERROR",String(e));
     }
   }
   const checked=new Date().toISOString();
