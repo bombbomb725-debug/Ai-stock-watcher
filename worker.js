@@ -104,6 +104,41 @@ async function lineReply(env,replyToken,text) {
   const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[{type:"text",text:String(text).slice(0,4900)}]})});
   if(!r.ok)console.error("LINE_REPLY_FAILED",r.status,(await r.text()).slice(0,250));
 }
+async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist") {
+  if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
+  const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[{type:"flex",altText,contents}]})});
+  if(!r.ok)console.error("LINE_FLEX_REPLY_FAILED",r.status,(await r.text()).slice(0,400));
+}
+function stockFlexBubble(symbol,trade,state,dashboardUrl) {
+  const price=Number(trade?.p);
+  const priceText=Number.isFinite(price)?"$"+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
+  const status=state?.status_label||"กำลังรอผลวิเคราะห์";
+  const score=Number.isFinite(Number(state?.score))?Number(state.score)+"/5":"—";
+  const checked=state?.checked_at?new Date(state.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอรอบสแกน";
+  const tone=state?.status==="buy"?"#16A36A":state?.status==="risk"?"#D94B59":"#D69B28";
+  return {
+    type:"bubble",size:"kilo",
+    header:{type:"box",layout:"horizontal",contents:[
+      {type:"text",text:symbol,weight:"bold",size:"xl",color:"#FFFFFF",flex:1},
+      {type:"text",text:"US STOCK",size:"xs",color:"#A9B8CC",align:"end",gravity:"center"}
+    ],backgroundColor:"#132238",paddingAll:"16px"},
+    body:{type:"box",layout:"vertical",spacing:"md",contents:[
+      {type:"text",text:priceText,size:"3xl",weight:"bold",color:"#FFFFFF"},
+      {type:"box",layout:"baseline",spacing:"sm",contents:[
+        {type:"text",text:"สถานะ",size:"sm",color:"#A9B8CC",flex:1},
+        {type:"text",text:status,size:"sm",weight:"bold",color:tone,wrap:true,flex:4}
+      ]},
+      {type:"box",layout:"baseline",spacing:"sm",contents:[
+        {type:"text",text:"คะแนน AI",size:"sm",color:"#A9B8CC",flex:1},
+        {type:"text",text:score,size:"sm",weight:"bold",color:"#FFFFFF",flex:4}
+      ]},
+      {type:"text",text:"อัปเดตสัญญาณ: "+checked,size:"xs",color:"#8293A9",wrap:true}
+    ],backgroundColor:"#0D1828",paddingAll:"16px"},
+    footer:{type:"box",layout:"vertical",contents:[
+      {type:"button",style:"primary",color:"#315FDB",action:{type:"uri",label:"ดูกราฟและราคาสด",uri:dashboardUrl+"?symbol="+encodeURIComponent(symbol)+"&utm_source=line"}}
+    ],backgroundColor:"#0D1828",paddingAll:"12px"}
+  };
+}
 async function linePush(env,userId,text) {
   const r=await fetch("https://api.line.me/v2/bot/message/push",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({to:userId,messages:[{type:"text",text:String(text).slice(0,4900)}]})});
   if(!r.ok)throw new Error("LINE push failed "+r.status+" "+(await r.text()).slice(0,200));
@@ -112,7 +147,7 @@ function parseLineCommand(text) {
   const t=String(text||"").trim();
   let m=t.match(/^(?:เพิ่ม|add|\/add)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"add",symbol:cleanSymbol(m[1])};
   m=t.match(/^(?:ลบ|remove|\/remove)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"remove",symbol:cleanSymbol(m[1])};
-  if(/^(?:รายการหุ้น|ดูหุ้น|list|\/list)$/i.test(t))return {action:"list"};
+  m=t.match(/^(?:รายการหุ้น|ดูหุ้น|list|\/list)(?:\s+(\d+))?$/i); if(m)return {action:"list",page:Math.max(1,Number(m[1]||1))};
   if(/^(?:หุ้นแนะนำ|แนะนำหุ้น|ideas|\/ideas)$/i.test(t))return {action:"ideas"};
   return {action:"help"};
 }
@@ -141,7 +176,29 @@ async function handleLineWebhook(request,env) {
       await lineReply(env,event.replyToken,"ลบ "+cmd.symbol+" ออกจาก Watchlist แล้ว\nเหลือ "+result.symbols.length+" หุ้น");
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
-      await lineReply(env,event.replyToken,"Watchlist ของคุณ ("+symbols.length+"/50)\n"+(symbols.join(", ")||"ยังไม่มีหุ้น"));
+      if(!symbols.length) {
+        await lineReply(env,event.replyToken,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
+        continue;
+      }
+      const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
+      const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
+      try {
+        const [trades,states]=await Promise.all([
+          fetchLatestTrades(env,pageSymbols),
+          env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
+        ]);
+        const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
+        const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
+        const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,trades[symbol],bySymbol.get(symbol),dashboard));
+        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
+        if(pageCount>1) {
+          const next=page<pageCount?"พิมพ์ “รายการหุ้น "+(page+1)+"” เพื่อดูหน้าถัดไป":"พิมพ์ “รายการหุ้น 1” เพื่อกลับหน้าแรก";
+          await linePush(env,lineUserId,"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount+"\n"+next);
+        }
+      } catch(e) {
+        console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
+        await lineReply(env,event.replyToken,"แสดงการ์ดหุ้นไม่สำเร็จ: "+String(e).slice(0,180));
+      }
     } else if(cmd.action==="ideas") {
       const rows=await env.DB.prepare("SELECT symbol,score,status,rationale FROM stock_ideas ORDER BY score DESC, symbol LIMIT 15").all();
       const lines=(rows.results||[]).map((x,i)=>(i+1)+". "+x.symbol+" · "+x.score+"/5 · "+x.status+" — "+(x.rationale||"คะแนนทางเทคนิค")).join("\n");
@@ -151,6 +208,16 @@ async function handleLineWebhook(request,env) {
     }
   }
   return json({ok:true});
+}
+async function fetchLatestTrades(env,symbols) {
+  if(!env.ALPACA_KEY||!env.ALPACA_SECRET)throw new Error("Worker secrets ALPACA_KEY / ALPACA_SECRET missing");
+  const u=new URL("https://data.alpaca.markets/v2/stocks/trades/latest");
+  u.searchParams.set("symbols",symbols.join(","));
+  u.searchParams.set("feed","iex");
+  const r=await fetch(u,{headers:{"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET}});
+  if(!r.ok)throw new Error("Alpaca latest trades "+r.status+": "+(await r.text()).slice(0,250));
+  const data=await r.json();
+  return data.trades||{};
 }
 async function fetchMarket(env,symbols,timeframe="1Day") {
   if(!env.ALPACA_KEY||!env.ALPACA_SECRET)throw new Error("Worker secrets ALPACA_KEY / ALPACA_SECRET missing");
