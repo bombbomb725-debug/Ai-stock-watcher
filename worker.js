@@ -51,7 +51,7 @@ async function authenticate(request,env) {
   const token=auth.startsWith("Bearer ")?auth.slice(7):"";
   const payload=await verifySession(token,env.APP_SESSION_SECRET);
   if(!payload?.sub)return null;
-  const user=await env.DB.prepare("SELECT id,line_user_id,display_name,picture_url FROM users WHERE id=?").bind(payload.sub).first();
+  const user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE id=?").bind(payload.sub).first();
   return user||null;
 }
 async function lineIdTokenProfile(idToken,env) {
@@ -65,15 +65,15 @@ async function lineIdTokenProfile(idToken,env) {
 async function createOrUpdateUser(env,lineUserId,profile={}) {
   const id="line:"+lineUserId;
   const existing=await env.DB.prepare("SELECT id FROM users WHERE line_user_id=?").bind(lineUserId).first();
-  await env.DB.prepare(`INSERT INTO users(id,line_user_id,display_name,picture_url,updated_at,last_seen_at)
-    VALUES(?,?,?,?,datetime('now'),datetime('now'))
+  await env.DB.prepare(`INSERT INTO users(id,line_user_id,display_name,updated_at,last_seen_at)
+    VALUES(?,?,?,datetime('now'),datetime('now'))
     ON CONFLICT(line_user_id) DO UPDATE SET display_name=COALESCE(excluded.display_name,users.display_name),
-    picture_url=COALESCE(excluded.picture_url,users.picture_url),updated_at=datetime('now'),last_seen_at=datetime('now')`)
-    .bind(id,lineUserId,profile.name||null,profile.picture||null).run();
+    updated_at=datetime('now'),last_seen_at=datetime('now')`)
+    .bind(id,lineUserId,profile.name||null).run();
   if(!existing) {
     for(const symbol of DEFAULT_SYMBOLS) await env.DB.prepare("INSERT OR IGNORE INTO watchlist(user_id,symbol) VALUES(?,?)").bind(id,symbol).run();
   }
-  return await env.DB.prepare("SELECT id,line_user_id,display_name,picture_url FROM users WHERE id=?").bind(id).first();
+  return await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE id=?").bind(id).first();
 }
 async function getWatchlist(env,userId) {
   const r=await env.DB.prepare("SELECT symbol,added_at FROM watchlist WHERE user_id=? ORDER BY added_at,symbol").bind(userId).all();
@@ -266,7 +266,7 @@ async function apiHandler(request,env,url,headers) {
     try {
       const profile=await lineIdTokenProfile(body.idToken,env),user=await createOrUpdateUser(env,profile.sub,{name:profile.name,picture:profile.picture});
       const token=await signSession({sub:user.id,exp:Math.floor(Date.now()/1000)+86400*14},env.APP_SESSION_SECRET);
-      return json({token,user:{displayName:user.display_name,pictureUrl:user.picture_url},symbols:await getWatchlist(env,user.id)},200,headers);
+      return json({token,user:{displayName:user.display_name,pictureUrl:null},symbols:await getWatchlist(env,user.id)},200,headers);
     } catch(e){return json({error:e.message||"LINE login failed"},401,headers);}
   }
   if(url.pathname==="/api/ideas"&&request.method==="GET") {
@@ -277,7 +277,7 @@ async function apiHandler(request,env,url,headers) {
   if(url.pathname.startsWith("/api/")&&url.pathname!=="/api/market"&&url.pathname!=="/api/assets") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
     const user=await authenticate(request,env);if(!user)return json({error:"กรุณาเข้าสู่ระบบด้วย LINE ใหม่"},401,headers);
-    if(url.pathname==="/api/me"&&request.method==="GET")return json({user:{displayName:user.display_name,pictureUrl:user.picture_url},symbols:await getWatchlist(env,user.id)},200,headers);
+    if(url.pathname==="/api/me"&&request.method==="GET")return json({user:{displayName:user.display_name,pictureUrl:null},symbols:await getWatchlist(env,user.id)},200,headers);
     if(url.pathname==="/api/watchlist"&&request.method==="GET")return json({symbols:await getWatchlist(env,user.id),max:MAX_WATCHLIST},200,headers);
     if(url.pathname==="/api/watchlist/add"&&request.method==="POST") {
       const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol);
