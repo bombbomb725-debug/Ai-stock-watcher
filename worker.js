@@ -1,4 +1,3 @@
-const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR","RDDT","MSTR","TEM","RGTI","QBTS","QUBT","HIMS","CRSP","RXRX","SPCE","APP","ORCL","CRM","NOW","PANW","CRWD","NET","SNOW","MU","TSM","ANET","GEV","CEG","VST","CCJ","LEU","UUUU","QS","ENVX","BBAI"];
 const MAX_WATCHLIST = 50;
 const ALLOWED_ORIGINS = new Set(["https://bombbomb725-debug.github.io"]);
 const encoder = new TextEncoder();
@@ -684,7 +683,7 @@ async function scanAlerts(env) {
   const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol,COALESCE(p.alerts_enabled,1) AS alerts_enabled FROM watchlist w JOIN users u ON u.id=w.user_id LEFT JOIN user_preferences p ON p.user_id=u.id ORDER BY u.id,w.symbol").all();
   const watch=rows.results||[];
   const resolvedWatch=await Promise.all(watch.map(async x=>({...x,symbol:await normalizeSymbol(env,x.symbol)})));
-  const symbols=[...new Set([...resolvedWatch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
+  const symbols=[...new Set(resolvedWatch.map(x=>x.symbol))];
   const market={};
   // Separate provider groups so a Thai-data outage never stops US stock scans.
   const groups=[symbols.filter(s=>!isThaiSymbol(s)),symbols.filter(isThaiSymbol)].filter(group=>group.length);
@@ -697,16 +696,6 @@ async function scanAlerts(env) {
     }
   }
   const checked=new Date().toISOString();
-  // Refresh Screener every 15 minutes using cron time; no scanned_at column required.
-  if(new Date().getUTCMinutes()%15===0) for(const symbol of SCREENER_SYMBOLS) {
-    const data=market[symbol];
-    if(!data)continue;
-    const signal=analyzeStatus(data.bars||[],Number(data.trade?.p),isThaiSymbol(symbol)?"Asia/Bangkok":"America/New_York");
-    await env.DB.prepare(`INSERT INTO stock_ideas(symbol,score,status,rationale)
-      VALUES(?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET score=excluded.score,status=excluded.status,
-      rationale=excluded.rationale`)
-      .bind(symbol,signal.score,signal.status,signal.label).run();
-  }
   if(!watch.length)return;
   // Read all saved states once instead of issuing one SELECT for every user/ticker pair.
   const stateRows=await env.DB.prepare("SELECT user_id,symbol,status FROM user_stock_state").all();
@@ -776,6 +765,47 @@ async function apiHandler(request,env,url,headers) {
       const token=await signSession({sub:user.id,exp:Math.floor(Date.now()/1000)+86400*14},env.APP_SESSION_SECRET);
       return json({token,user:{displayName:user.display_name,pictureUrl:null},symbols:await getWatchlist(env,user.id)},200,headers);
     } catch(e){return json({error:e.message||"LINE login failed"},401,headers);}
+  }
+  if(url.pathname==="/api/screener"&&request.method==="GET") {
+    if(!env.ALPACA_KEY||!env.ALPACA_SECRET)return json({error:"Worker secrets ALPACA_KEY / ALPACA_SECRET missing"},503,headers);
+    const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};
+    const requests=await Promise.allSettled([
+      fetch("https://data.alpaca.markets/v1beta1/screener/stocks/most-actives?by=volume&top=50",{headers:auth}),
+      fetch("https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=50",{headers:auth})
+    ]);
+    const payloads=[];
+    for(let i=0;i<requests.length;i++) {
+      const result=requests[i];
+      if(result.status!=="fulfilled"||!result.value.ok)continue;
+      try{payloads.push(await result.value.json());}catch(e){console.warn("SCREENER_JSON_ERROR",String(e));}
+    }
+    if(!payloads.length)return json({error:"Alpaca Screener ใช้งานไม่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"},502,headers);
+    const symbols=new Set();
+    for(const p of payloads) {
+      for(const x of p.most_actives||[])if(/^[A-Z]{1,5}(?:\\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
+      for(const x of [...(p.gainers||[]),...(p.losers||[])])if(/^[A-Z]{1,5}(?:\\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
+    }
+    const candidates=[...symbols];
+    if(!candidates.length)return json({ideas:[],candidateCount:0,scannedCount:0,fetchedAt:new Date().toISOString()},200,headers);
+    const market={};
+    for(let i=0;i<candidates.length;i+=50) {
+      try {
+        const batch=await fetchMarket(env,candidates.slice(i,i+50),"1Day");
+        Object.assign(market,batch.stocks||{});
+      } catch(e) {
+        console.error("SCREENER_MARKET_BATCH_ERROR",i,String(e));
+      }
+    }
+    const ranked=[];
+    for(const symbol of candidates) {
+      const item=market[symbol],bars=item?.bars||[];
+      if(bars.length<55)continue;
+      const signal=analyzeStatus(bars,Number(item.trade?.p),"America/New_York");
+      const price=Number(item.trade?.p)>0?Number(item.trade.p):Number(bars[bars.length-1]?.c);
+      ranked.push({symbol,score:signal.score,status:signal.status,label:signal.label,price:Number.isFinite(price)?price:null,ema20:signal.ema20,ema50:signal.ema50,rsi:signal.rsi,macd:signal.macd,adx:signal.adx});
+    }
+    ranked.sort((a,b)=>b.score-a.score||(a.status==="buy"?-1:0)-(b.status==="buy"?-1:0)||a.symbol.localeCompare(b.symbol));
+    return json({ideas:ranked.slice(0,50),candidateCount:candidates.length,scannedCount:ranked.length,fetchedAt:new Date().toISOString(),universe:"Alpaca US most-active stocks + top gainers/losers"},200,headers);
   }
   if(url.pathname==="/api/ideas"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
