@@ -503,9 +503,17 @@ async function fetchMarket(env,symbols,timeframe="1Day") {
     const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET},base="https://data.alpaca.markets/v2",end=new Date(),days=timeframe==="4Hour"?45:timeframe==="5Min"?3:140,start=new Date(end.getTime()-days*86400000);
     const u=new URL(base+"/stocks/bars");u.searchParams.set("symbols",us.join(","));u.searchParams.set("timeframe",timeframe);u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());u.searchParams.set("limit","1000");u.searchParams.set("feed","iex");u.searchParams.set("sort","asc");u.searchParams.set("adjustment","raw");
     const tu=new URL(base+"/stocks/trades/latest");tu.searchParams.set("symbols",us.join(","));tu.searchParams.set("feed","iex");
-    const [br,tr]=await Promise.all([fetch(u,{headers:auth}),fetch(tu,{headers:auth})]);
-    if(!br.ok)throw new Error("Alpaca bars "+br.status+": "+(await br.text()).slice(0,250));if(!tr.ok)throw new Error("Alpaca latest trades "+tr.status+": "+(await tr.text()).slice(0,250));
-    const [bd,td]=await Promise.all([br.json(),tr.json()]);
+    const [barResult,tradeResult]=await Promise.allSettled([fetch(u,{headers:auth}),fetch(tu,{headers:auth})]);
+    if(barResult.status!=="fulfilled")throw new Error("Alpaca bars request failed: "+String(barResult.reason||"network error"));
+    const br=barResult.value;
+    if(!br.ok)throw new Error("Alpaca bars "+br.status+": "+(await br.text()).slice(0,250));
+    const bd=await br.json();
+    let td={trades:{}};
+    if(tradeResult.status==="fulfilled"&&tradeResult.value.ok){
+      try{td=await tradeResult.value.json();}catch(e){console.warn("ALPACA_LATEST_TRADES_JSON_ERROR",String(e));}
+    }else{
+      console.warn("ALPACA_LATEST_TRADES_UNAVAILABLE",tradeResult.status==="rejected"?String(tradeResult.reason):"HTTP "+tradeResult.value.status);
+    }
     for(const symbol of us)stocks[symbol]={bars:bd.bars?.[symbol]||[],trade:td.trades?.[symbol]||null,currency:"USD",exchange:"US"};
   }
   for(let i=0;i<thai.length;i+=5) {
