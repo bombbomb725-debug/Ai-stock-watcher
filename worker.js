@@ -239,9 +239,17 @@ async function ensureRichMenu(env) {
   return menu.richMenuId;
 }
 
-async function lineReply(env,replyToken,text) {
+function watchlistQuickReply(symbols) {
+  const items=(symbols||[]).slice(0,13).map(symbol=>({
+    type:"action",
+    action:{type:"message",label:symbol,text:"ลบ "+symbol}
+  }));
+  return items.length?{items}:undefined;
+}
+async function lineReply(env,replyToken,text,quickReply) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
   const message={type:"text",text:String(text).slice(0,4900)};
+  if(quickReply?.items?.length)message.quickReply=quickReply;
   const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
   if(!r.ok)console.error("LINE_REPLY_FAILED",r.status,(await r.text()).slice(0,250));
 }
@@ -433,7 +441,8 @@ async function handleLineWebhook(request,env) {
       if(!symbols.length)await lineReply(env,event.replyToken,"Watchlist ยังว่าง ไม่มีหุ้นให้ลบ");
       else {
         await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"remove",Math.floor(Date.now()/1000)+600).run();
-        await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการลบได้เลย เช่น AMZN NVDA หรือ AMZN,NVDA ("+symbols.length+" หุ้นในรายการ)");
+        const more=symbols.length>13?"\\n(ปุ่มเลือกแสดงได้ 13 หุ้นแรก หากต้องการลบตัวอื่น พิมพ์ ลบ ตามด้วยตัวย่อหุ้น)":"";
+        await lineReply(env,event.replyToken,"เลือกหุ้นที่ต้องการลบจากปุ่มด้านล่างได้เลย ("+symbols.length+" หุ้นในรายการ)"+more,watchlistQuickReply(symbols));
       }
     } else if(cmd.action==="settings") {
       await lineReply(env,event.replyToken,"ตั้งค่าแจ้งเตือนสถานะหุ้น\nพิมพ์ “เปิดแจ้งเตือน” หรือ “ปิดแจ้งเตือน” เพื่อเปลี่ยนการตั้งค่า");
@@ -459,7 +468,12 @@ async function handleLineWebhook(request,env) {
       }
       await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=?").bind(user.id).run();
       const current=await getWatchlist(env,user.id);
-      await lineReply(env,event.replyToken,results.join("\\n")+"\\n\\nWatchlist ปัจจุบัน "+current.length+"/50 หุ้น");
+      const summary=results.join("\\n")+"\\n\\nWatchlist ปัจจุบัน "+current.length+"/50 หุ้น";
+      if(cmd.action==="remove"&&current.length) {
+        await lineReply(env,event.replyToken,summary+"\\nเลือกหุ้นที่ต้องการลบต่อได้จากปุ่มด้านล่าง",watchlistQuickReply(current));
+      } else {
+        await lineReply(env,event.replyToken,summary);
+      }
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length) {
