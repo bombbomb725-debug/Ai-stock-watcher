@@ -332,7 +332,7 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
       {type:"text",text:score,size:"sm",weight:"bold",color:"#FFFFFF",flex:4}
     ]},
     {type:"text",text:"EMA20/50 "+(Number.isFinite(detail.ema20)?detail.ema20.toFixed(2):"—")+" / "+(Number.isFinite(detail.ema50)?detail.ema50.toFixed(2):"—")+" · RSI14 "+(Number.isFinite(detail.rsi)?detail.rsi.toFixed(1):"—")+" · MACD "+(Number.isFinite(detail.macd)?detail.macd.toFixed(3):"—")+" · ADX14 "+(Number.isFinite(detail.adx)?detail.adx.toFixed(1):"—"),size:"xs",color:"#A9B8CC",wrap:true},
-    {type:"text",text:"กราฟราคา 5 นาที · อัปเดตสัญญาณ: "+checked+" · "+(thai?"DataCedar (ราคาปิดย้อนหลัง)":"Alpaca IEX"),size:"xs",color:"#8293A9",wrap:true}
+    {type:"text",text:(thai?"ราคาอ้างอิง DataCedar · ราคาปิดรายวัน":"กราฟราคา 5 นาที · Alpaca IEX")+" · อัปเดตสัญญาณ: "+checked,size:"xs",color:"#8293A9",wrap:true}
   );
   if(plan)contents.push(
     {type:"separator",margin:"md",color:"#314158"},
@@ -476,7 +476,7 @@ async function handleLineWebhook(request,env) {
         ]);
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
-        const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[],dailyMarket.stocks?.[symbol]?.bars||[]));
+        const bubbles=pageSymbols.map(symbol=>{const intraday=market.stocks?.[symbol],daily=dailyMarket.stocks?.[symbol],thai=isThaiSymbol(symbol);const latestTrade=intraday?.trade||(thai?daily?.trade:null);return stockFlexBubble(symbol,latestTrade,bySymbol.get(symbol),dashboard,intraday?.bars||[],daily?.bars||[]);});
         await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
         if(pageCount>1)await lineReply(env,event.replyToken,"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”");
       } catch(e) {
