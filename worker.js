@@ -244,7 +244,12 @@ async function scanAlerts(env) {
       stateByKey.set(key,signal.status);
       continue;
     }
-    if(oldStatus===signal.status)continue;
+    if(oldStatus===signal.status) {
+      // Keep the scan heartbeat fresh even when the signal has not changed.
+      await env.DB.prepare("UPDATE user_stock_state SET status_label=?,score=?,last_price=?,checked_at=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND symbol=? AND status=?")
+        .bind(signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol,oldStatus).run();
+      continue;
+    }
     const upd=await env.DB.prepare("UPDATE user_stock_state SET status=?,last_status=?,status_label=?,score=?,last_price=?,checked_at=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND symbol=? AND status=?")
       .bind(signal.status,signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol,oldStatus).run();
     if((upd.meta?.changes||0)!==1)continue;
