@@ -154,6 +154,21 @@ function chartSvg(bars,livePrice,caption="กราฟย้อนหลัง �
   const last=cl.length-1;
   return '<div class="chart-wrap"><div class="chart-caption">'+caption+' · EMA20 / EMA50</div><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคา</span><span>EMA20</span><span>EMA50</span></div></div>';
 }
+async function resolveSymbols(symbols){
+  return Promise.all(symbols.map(async raw=>{
+    const symbol=String(raw||"").trim().toUpperCase();
+    if(!/^[A-Z0-9]{1,8}$/.test(symbol)||isThaiSymbol(symbol))return symbol;
+    try{
+      const url=state.apiUrl.replace(/\/$/,"")+"/api/assets?q="+encodeURIComponent(symbol);
+      const response=await fetch(url,{cache:"no-store"});
+      if(!response.ok)return symbol;
+      const data=await response.json(),matches=data.assets||[];
+      const us=matches.some(x=>x.market==="US"&&String(x.symbol||"").toUpperCase()===symbol);
+      const thai=matches.find(x=>x.market==="THAI"&&String(x.symbol||"").toUpperCase()===symbol+".BK");
+      return thai&&!us?symbol+".BK":symbol;
+    }catch{return symbol;}
+  }));
+}
 function isThaiSymbol(symbol){return /^[A-Z0-9]{1,8}\.BK$/.test(String(symbol||"").toUpperCase());}
 function marketCurrency(symbol){return isThaiSymbol(symbol)?"฿":"$";}
 function entryPlan(bars,a,symbol){
@@ -189,7 +204,7 @@ function renderCard(symbol,item){
   const decisionHtml='<section class="decision '+decision.tone+'"><div class="decision-heading"><span>สรุปง่ายๆ</span><b>'+decision.label+'</b></div><p>'+decision.detail+'</p></section>';
   const planHtml=plan?`<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อเมื่อกลับตัวเป็นขาขึ้น</div><div class="entry-range">${currency}${fmt(plan.low)} – ${currency}${fmt(plan.high)}</div><div class="entry-levels"><span>เป้าหมาย 2R <b>${currency}${fmt(plan.target)}</b></span><span>จุดตัดขาดทุน <b>${currency}${fmt(plan.stop)}</b></span></div><small>${a.confirmed?'แนวโน้มผ่านเงื่อนไขแล้ว รอราคาเข้ามาในโซนนี้ ไม่ไล่ซื้อ':'ระดับประมาณการล่วงหน้า ยังไม่ใช่สัญญาณซื้อ รอให้สถานะเป็นสีเขียวก่อน'}</small></section>`:"";
   const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH",{timeZone:thai?"Asia/Bangkok":"America/New_York"}):"ไม่พบรายการซื้อขายล่าสุด";
-  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(state.assetNames?.[symbol]||NAMES[symbol]||(thai?"หุ้นไทย · SET/mai":"หุ้นสหรัฐฯ"))+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?currency+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price,item.intradayBars?.length?"กราฟระหว่างวัน · แท่ง 5 นาที":"กราฟย้อนหลัง · รายวัน")+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div><div class="metric"><span>ADX14</span><b>'+fmt(a.adx)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · สถานะ/คะแนนอิงผลสแกน 1D '+(item.signal?.checked_at?new Date(item.signal.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอผลสแกน")+' · IEX</div></article>';
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(state.assetNames?.[symbol]||NAMES[symbol]||(thai?"หุ้นไทย · SET/mai":"หุ้นสหรัฐฯ"))+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?currency+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price,item.intradayBars?.length?"กราฟระหว่างวัน · แท่ง 5 นาที":"กราฟย้อนหลัง · รายวัน")+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div><div class="metric"><span>ADX14</span><b>'+fmt(a.adx)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · สถานะ/คะแนนอิงผลสแกน 1D '+(item.signal?.checked_at?new Date(item.signal.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอผลสแกน")+' · '+(thai?'Yahoo Finance · ข้อมูลล่าช้า/ไม่เป็นทางการ':'Alpaca IEX')+'</div></article>';
 }
 function setStatus(msg,ok=false){
   $("#connection").textContent=msg;
@@ -418,6 +433,9 @@ async function loadMarket(){
   setStatus("กำลังดึงข้อมูลตลาด");
   try{
     if(!state.symbols.length){renderMarketCards([],{});return;}
+    const normalized=await resolveSymbols(state.symbols);
+    if(normalized.some((s,i)=>s!==state.symbols[i])){state.symbols=[...new Set(normalized)];saveSymbols();renderWatchlist();}
+    if(state.focusSymbol)state.focusSymbol=(await resolveSymbols([state.focusSymbol]))[0];
     const displaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
     const [dailyResult,intradayResult,signalResult]=await Promise.all([
       fetchMarket(displaySymbols,"1Day").then(value=>({status:"fulfilled",value}),reason=>({status:"rejected",reason})),
@@ -437,13 +455,14 @@ async function loadMarket(){
     const count=Object.values(state.market).reduce((n,x)=>n+(x.bars||[]).length,0);
     const chartFallback=intradayResult.status!=="fulfilled";
     const signalFallback=signalResult.status!=="fulfilled";
-    setStatus("เชื่อมต่อแล้ว · Alpaca IEX"+(chartFallback?" · ใช้กราฟรายวันสำรอง":"")+(signalFallback?" · คำนวณสถานะจากข้อมูลราคา":""),true);
+    setStatus("เชื่อมต่อแล้ว · Alpaca IEX (สหรัฐฯ) + Yahoo Finance (หุ้นไทย)"+(chartFallback?" · ใช้กราฟรายวันสำรอง":"")+(signalFallback?" · คำนวณสถานะจากข้อมูลราคา":""),true);
     $("#updated").textContent="อัปเดต "+new Date().toLocaleString("th-TH")+" · ข้อมูลย้อนหลัง "+count+" แท่ง";
   }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#usCards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลหุ้นสหรัฐฯ ไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p></article>';$("#thaiCards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลหุ้นไทยไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p></article>';}
   finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
 }
 async function addSymbol(symbol){
   symbol=String(symbol||"").trim().toUpperCase();
+  symbol=(await resolveSymbols([symbol]))[0];
   if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
   if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นแล้ว");return;}
