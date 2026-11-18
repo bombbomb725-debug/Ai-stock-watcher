@@ -373,6 +373,14 @@ async function apiHandler(request,env,url,headers) {
     const all=await r.json(),assets=all.filter(a=>a.tradable&&a.exchange&&((a.symbol||"").toUpperCase().includes(q)||(a.name||"").toUpperCase().includes(q))).slice(0,20).map(a=>({symbol:a.symbol,name:a.name,exchange:a.exchange}));
     return json({assets},200,headers);
   }
+  if(url.pathname==="/api/quotes"&&request.method==="GET") {
+    const requested=(url.searchParams.get("symbols")||"").split(",").map(cleanSymbol).filter(validSymbol);
+    const symbols=[...new Set(requested)];
+    if(!symbols.length)return json({error:"No supported symbols requested"},400,headers);
+    if(symbols.length>50)return json({error:"Maximum 50 symbols per request",max:50},400,headers);
+    try{return json({feed:"Alpaca IEX",fetchedAt:new Date().toISOString(),trades:await fetchLatestTrades(env,symbols)},200,headers);}
+    catch(e){return json({error:"Latest quote request failed",detail:String(e).slice(0,300)},502,headers);}
+  }
   if(url.pathname==="/api/market"&&request.method==="GET") {
     const requested=(url.searchParams.get("symbols")||DEFAULT_SYMBOLS.join(",")).split(",").map(cleanSymbol).filter(validSymbol);
     const symbols=[...new Set(requested)],tf=(url.searchParams.get("timeframe")||"1Day").toLowerCase()==="4hour"?"4Hour":"1Day";
