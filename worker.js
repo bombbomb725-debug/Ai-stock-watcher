@@ -422,7 +422,8 @@ function parseLineCommand(text) {
   m=t.match(/^(?:เชื่อม|link)\s+([A-Z2-9]{8,12})$/i); if(m)return {action:"link",code:m[1].toUpperCase()};
   if(/^(?:ทดสอบแจ้งเตือน|ทดสอบการแจ้งเตือน|test alert|\/test-alert)$/i.test(t))return {action:"test"};
   if(/^(?:หุ้นแนะนำ|แนะนำหุ้น|หุ้นที่น่าสนใจ|หุ้นน่าสนใจ|ideas|\/ideas)$/i.test(t))return {action:"ideas"};
-  if(/^(?:ดูหุ้นของฉัน|ดูหุ้น|ราคาเข้าซื้อ|buy zones|menu|เมนู)$/i.test(t))return {action:"list",page:1};
+  if(/^(?:ราคาเข้าซื้อ|buy zones|โซนเฝ้าระวังหุ้น|โซนเข้าซื้อ)$/i.test(t))return {action:"buy_zones",page:1};
+  if(/^(?:ดูหุ้นของฉัน|ดูหุ้น|menu|เมนู)$/i.test(t))return {action:"list",page:1};
   if(/^(?:เพิ่มหุ้น|add stock)$/i.test(t))return {action:"add_prompt"};
   if(/^(?:ลบหุ้น|remove stock)$/i.test(t))return {action:"remove_menu"};
   if(/^(?:ตั้งค่าแจ้งเตือน|settings)$/i.test(t))return {action:"settings"};
@@ -448,9 +449,6 @@ async function handleLineWebhook(raw,signature,env) {
     }
     const isTextMessage=event.type==="message"&&event.message?.type==="text";
     const cmd=isTextMessage?parseLineCommand(event.message.text):null;
-    if(cmd?.action==="list") {
-      await lineReply(env,event.replyToken,"รับคำสั่งแล้ว กำลังโหลดรายการหุ้นของคุณ…");
-    }
     const user=await createOrUpdateUser(env,lineUserId,{});
     if(event.type==="follow") {
       await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\nสูงสุด 50 หุ้นต่อคน\n\nเชื่อมเว็บ: เปิดเว็บไซต์ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ในแชตนี้");
@@ -516,7 +514,7 @@ async function handleLineWebhook(raw,signature,env) {
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length) {
-        await linePush(env,lineUserId,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
+        await lineReply(env,event.replyToken,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
         continue;
       }
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
@@ -528,13 +526,36 @@ async function handleLineWebhook(raw,signature,env) {
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
         const bubbles=pageSymbols.map(symbol=>watchlistStatusBubble(symbol,bySymbol.get(symbol),dashboard));
-        const messages=[{type:"flex",altText:"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount,contents:{type:"carousel",contents:bubbles}}];
-        if(pageCount>1)messages.push({type:"text",text:"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”"});
-        await linePushMessages(env,lineUserId,messages);
+        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
+        if(pageCount>1)console.log("LINE_WATCHLIST_MORE_PAGES",user.id,pageCount);
       } catch(e) {
         console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
         try{await linePush(env,lineUserId,"โหลดรายชื่อหุ้นไม่สำเร็จ: "+String(e).slice(0,220)+"\\nกรุณาลองใหม่อีกครั้ง");}
         catch(pushError){console.error("LINE_WATCHLIST_PUSH_ERROR",String(pushError));}
+      }
+    } else if(cmd.action==="buy_zones") {
+      const symbols=await getWatchlist(env,user.id);
+      if(!symbols.length) {
+        await lineReply(env,event.replyToken,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
+      } else {
+        const pageSymbols=symbols.slice(0,10);
+        try {
+          const [market,states]=await Promise.all([
+            fetchMarket(env,pageSymbols,"1Day"),
+            env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
+          ]);
+          const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
+          const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
+          const bubbles=pageSymbols.map(symbol=>{
+            const item=market.stocks?.[symbol]||{};
+            return stockFlexBubble(symbol,item.trade,bySymbol.get(symbol),dashboard,item.bars||[],item.bars||[]);
+          });
+          await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"โซนราคาเฝ้ารอเข้าซื้อ · "+symbols.length+" หุ้น");
+          if(symbols.length>10)console.log("LINE_BUY_ZONES_MORE_THAN_TEN",user.id,symbols.length);
+        } catch(e) {
+          console.error("LINE_BUY_ZONES_ERROR",String(e));
+          await lineReply(env,event.replyToken,"โหลดโซนราคาเฝ้ารอเข้าซื้อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+        }
       }
     } else if(cmd.action==="test") {
       try {
