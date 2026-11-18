@@ -515,23 +515,26 @@ async function handleLineWebhook(raw,signature,env) {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length) {
         await lineReply(env,event.replyToken,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
-        continue;
-      }
-      const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
-      const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
-      try {
-        // Read the saved watchlist state only. Do not wait for a fresh Alpaca
-        // history/trades request just to display the user's list in LINE.
-        const states=await env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all();
-        const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
-        const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
-        const bubbles=pageSymbols.map(symbol=>watchlistStatusBubble(symbol,bySymbol.get(symbol),dashboard));
-        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
-        if(pageCount>1)console.log("LINE_WATCHLIST_MORE_PAGES",user.id,pageCount);
-      } catch(e) {
-        console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
-        try{await linePush(env,lineUserId,"โหลดรายชื่อหุ้นไม่สำเร็จ: "+String(e).slice(0,220)+"\\nกรุณาลองใหม่อีกครั้ง");}
-        catch(pushError){console.error("LINE_WATCHLIST_PUSH_ERROR",String(pushError));}
+      } else {
+        const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
+        const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
+        try {
+          const [market,states]=await Promise.all([
+            fetchMarket(env,pageSymbols,"1Day"),
+            env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
+          ]);
+          const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
+          const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
+          const bubbles=pageSymbols.map(symbol=>{
+            const item=market.stocks?.[symbol]||{};
+            return stockFlexBubble(symbol,item.trade,bySymbol.get(symbol),dashboard,item.bars||[],item.bars||[]);
+          });
+          await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
+          if(pageCount>1)await linePush(env,lineUserId,"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”");
+        } catch(e) {
+          console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
+          await lineReply(env,event.replyToken,"โหลดการ์ดหุ้นไม่สำเร็จ: "+String(e).slice(0,180)+"\\nกรุณาลองใหม่อีกครั้ง");
+        }
       }
     } else if(cmd.action==="buy_zones") {
       const symbols=await getWatchlist(env,user.id);
