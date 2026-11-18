@@ -149,7 +149,7 @@ function parseLineCommand(text) {
   const t=String(text||"").trim();
   let m=t.match(/^(?:เพิ่ม|add|\/add)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"add",symbol:cleanSymbol(m[1])};
   m=t.match(/^(?:ลบ|remove|\/remove)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"remove",symbol:cleanSymbol(m[1])};
-  m=t.match(/^(?:รายการหุ้น|ดูหุ้น|list|\/list)(?:\s+(\d+))?$/i); if(m)return {action:"list",page:Math.max(1,Number(m[1]||1))};
+  m=t.match(/^(?:รายการหุ้น|รายชื่อหุ้น|ดูรายการหุ้น|ดูหุ้น|list|\/list)(?:\s+(\d+))?$/i); if(m)return {action:"list",page:Math.max(1,Number(m[1]||1))};
   if(/^(?:หุ้นแนะนำ|แนะนำหุ้น|ideas|\/ideas)$/i.test(t))return {action:"ideas"};
   return {action:"help"};
 }
