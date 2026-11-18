@@ -179,20 +179,100 @@ async function apiRequest(path,options={}) {
   if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
   return data;
 }
-function initializeAccount() {
-  state.shared=false;
-  state.user=null;
-  state.symbols=loadSavedSymbols();
+function showPairingCode(code) {
+  $("#accountStatus").innerHTML='ยังไม่เชื่อม LINE · เปิดแชตบอต AI Stock Watcher แล้วพิมพ์ <b>เชื่อม '+escapeHtml(code)+'</b> · รหัสหมดอายุใน 10 นาที';
+}
+async function activateSharedAccount(data) {
+  const localSymbols=[...state.symbols];
+  state.user=data.user||null;
+  state.shared=true;
+  state.symbols=data.symbols||[];
+  for(const symbol of localSymbols) {
+    if(state.symbols.includes(symbol))continue;
+    const added=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
+    if(added.ok)state.symbols=added.symbols;
+  }
+  const current=await apiRequest("/api/me");
+  state.symbols=current.symbols||state.symbols;
+  state.user=current.user||state.user;
+  saveSymbols();
+  sessionStorage.removeItem("stockWatcherLinkCode");
+  sessionStorage.removeItem("stockWatcherLinkExpiry");
   renderWatchlist();
-  $("#accountStatus").textContent="Watchlist บันทึกไว้ในเว็บนี้";
-  setStatus("พร้อมใช้งาน");
+  $("#accountStatus").textContent="เชื่อม LINE แล้ว"+(state.user?.displayName?" · "+state.user.displayName:"")+" · ใช้ Watchlist ร่วมกัน";
+  setStatus("บัญชี LINE เชื่อมแล้ว",true);
   loadMarket();
 }
-async function removeSymbol(symbol) {
-  state.symbols=state.symbols.filter(s=>s!==symbol);
-  saveSymbols();
+async function pollLineLink() {
+  if(!state.sessionToken)return;
+  try {
+    const data=await apiRequest("/api/link/status");
+    if(data.linked){await activateSharedAccount(data);return;}
+    const code=sessionStorage.getItem("stockWatcherLinkCode");
+    if(code)showPairingCode(code);
+  } catch(e) {
+    sessionStorage.removeItem("stockWatcherSessionToken");
+    sessionStorage.removeItem("stockWatcherLinkCode");
+    sessionStorage.removeItem("stockWatcherLinkExpiry");
+    state.sessionToken="";
+    $("#accountStatus").textContent="การเชื่อมต่อหมดอายุ กำลังสร้างรหัสใหม่…";
+    await startLinePairing();
+    return;
+  }
+  setTimeout(pollLineLink,3000);
+}
+async function startLinePairing() {
+  let code=sessionStorage.getItem("stockWatcherLinkCode");
+  let expiry=Number(sessionStorage.getItem("stockWatcherLinkExpiry")||0);
+  if(!state.sessionToken||!code||expiry<=Date.now()) {
+    const data=await apiRequest("/api/link/start",{method:"POST",body:"{}"});
+    state.sessionToken=data.token;
+    sessionStorage.setItem("stockWatcherSessionToken",data.token);
+    sessionStorage.setItem("stockWatcherLinkCode",data.code);
+    sessionStorage.setItem("stockWatcherLinkExpiry",String(data.expiresAt*1000));
+    code=data.code;
+  }
+  showPairingCode(code);
+  setTimeout(pollLineLink,1200);
+}
+async function initializeAccount() {
+  state.user=null;
   renderWatchlist();
-  loadMarket();
+  try {
+    if(state.sessionToken) {
+      const data=await apiRequest("/api/link/status");
+      if(data.linked){await activateSharedAccount(data);return;}
+    }
+    await startLinePairing();
+    setStatus("รอเชื่อมบัญชี LINE");
+    loadMarket();
+  } catch(e) {
+    state.sessionToken="";
+    sessionStorage.removeItem("stockWatcherSessionToken");
+    sessionStorage.removeItem("stockWatcherLinkCode");
+    sessionStorage.removeItem("stockWatcherLinkExpiry");
+    try {
+      await startLinePairing();
+      setStatus("รอเชื่อมบัญชี LINE");
+    } catch(err) {
+      $("#accountStatus").textContent="เชื่อมต่อระบบจับคู่ LINE ไม่สำเร็จ: "+err.message;
+      setStatus("เชื่อมต่อบัญชีไม่สำเร็จ");
+    }
+    loadMarket();
+  }
+}
+async function removeSymbol(symbol) {
+  try {
+    if(state.shared) {
+      const data=await apiRequest("/api/watchlist/remove",{method:"POST",body:JSON.stringify({symbol})});
+      state.symbols=data.symbols||[];
+    } else {
+      state.symbols=state.symbols.filter(s=>s!==symbol);
+    }
+    saveSymbols();
+    renderWatchlist();
+    loadMarket();
+  } catch(e) {setStatus("ลบหุ้นไม่สำเร็จ: "+e.message);}
 }
 function renderIdeas(){
   const root=$("#ideas");
@@ -295,11 +375,16 @@ async function addSymbol(symbol){
   if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
   if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นแล้ว");return;}
-  state.symbols.push(symbol);
-  saveSymbols();
-  renderWatchlist();
-  $("#searchResults").innerHTML="";$("#stockSearch").value="";
-  loadMarket();
+  try {
+    if(state.shared) {
+      const data=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
+      state.symbols=data.symbols||state.symbols;
+    } else state.symbols.push(symbol);
+    saveSymbols();
+    renderWatchlist();
+    $("#searchResults").innerHTML="";$("#stockSearch").value="";
+    loadMarket();
+  } catch(e) {setStatus("เพิ่มหุ้นไม่สำเร็จ: "+e.message);}
 }
 async function searchAssets(){
   const q=$("#stockSearch").value.trim();if(!q)return;
