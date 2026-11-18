@@ -1,4 +1,3 @@
-const DEFAULT_SYMBOLS = ["ASTS", "RKLB", "IONQ", "OKLO"];
 const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR","RDDT","MSTR","TEM","RGTI","QBTS","QUBT","HIMS","CRSP","RXRX","SPCE","APP","ORCL","CRM","NOW","PANW","CRWD","NET","SNOW","MU","TSM","ANET","GEV","CEG","VST","CCJ","LEU","UUUU","QS","ENVX","BBAI"];
 const MAX_WATCHLIST = 50;
 const ALLOWED_ORIGINS = new Set(["https://bombbomb725-debug.github.io"]);
@@ -91,10 +90,6 @@ async function createOrUpdateUser(env,lineUserId,profile={}) {
     .bind(lineUserId,profile.name||null).run();
   user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
   if(!user)throw new Error("สร้างข้อมูลผู้ใช้ใน D1 ไม่สำเร็จ");
-  for(const symbol of DEFAULT_SYMBOLS) {
-    await env.DB.prepare("INSERT OR IGNORE INTO watchlist(user_id,symbol) VALUES(?,?)")
-      .bind(user.id,symbol).run();
-  }
   return user;
 }
 async function getWatchlist(env,userId) {
