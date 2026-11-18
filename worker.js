@@ -331,7 +331,6 @@ async function handleLineWebhook(request,env) {
       await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=?").bind(user.id).run();
       const current=await getWatchlist(env,user.id);
       await lineReply(env,event.replyToken,results.join("\\n")+"\\n\\nWatchlist ปัจจุบัน "+current.length+"/50 หุ้น");
-    }
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length) {
