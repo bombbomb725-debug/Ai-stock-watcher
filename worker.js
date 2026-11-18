@@ -122,6 +122,7 @@ async function getWatchlist(env,userId) {
   return await normalizeSymbols(env,(r.results||[]).map(x=>x.symbol));
 }
 async function addWatch(env,userId,symbol) {
+  symbol=await normalizeSymbol(env,symbol);
   const exists=await env.DB.prepare("SELECT 1 AS yes FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,symbol).first();
   if(exists)return {ok:true,already:true,symbols:await getWatchlist(env,userId)};
   const count=await env.DB.prepare("SELECT COUNT(*) AS n FROM watchlist WHERE user_id=?").bind(userId).first();
@@ -130,6 +131,7 @@ async function addWatch(env,userId,symbol) {
   return {ok:true,symbols:await getWatchlist(env,userId)};
 }
 async function removeWatch(env,userId,symbol) {
+  symbol=await normalizeSymbol(env,symbol);
   await env.DB.prepare("DELETE FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
   await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
   return {ok:true,symbols:await getWatchlist(env,userId)};
@@ -617,7 +619,8 @@ async function scanAlerts(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY, alerts_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
   const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol,COALESCE(p.alerts_enabled,1) AS alerts_enabled FROM watchlist w JOIN users u ON u.id=w.user_id LEFT JOIN user_preferences p ON p.user_id=u.id ORDER BY u.id,w.symbol").all();
   const watch=rows.results||[];
-  const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
+  const resolvedWatch=await Promise.all(watch.map(async x=>({...x,symbol:await normalizeSymbol(env,x.symbol)})));
+  const symbols=[...new Set([...resolvedWatch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
   const market={};
   // Separate provider groups so a Thai-data outage never stops US stock scans.
   const groups=[symbols.filter(s=>!isThaiSymbol(s)),symbols.filter(isThaiSymbol)].filter(group=>group.length);
@@ -644,7 +647,7 @@ async function scanAlerts(env) {
   // Read all saved states once instead of issuing one SELECT for every user/ticker pair.
   const stateRows=await env.DB.prepare("SELECT user_id,symbol,status FROM user_stock_state").all();
   const stateByKey=new Map((stateRows.results||[]).map(x=>[x.user_id+"|"+x.symbol,x.status]));
-  for(const item of watch) {
+  for(const item of resolvedWatch) {
     const data=market[item.symbol];
     if(!data||data.error||(data.bars||[]).length<55)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p),isThaiSymbol(item.symbol)?"Asia/Bangkok":"America/New_York");
