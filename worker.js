@@ -194,10 +194,10 @@ async function ensureRichMenu(env) {
     const create=await fetch("https://api.line.me/v2/bot/richmenu",{method:"POST",headers:{...headers,"Content-Type":"application/json"},body:JSON.stringify({size:{width:2500,height:1686},selected:true,name:"AI Stock Watcher · 6 Buttons",chatBarText:"เมนู AI Stock",areas})});
     if(!create.ok)throw new Error("LINE rich menu create "+create.status+": "+(await create.text()).slice(0,300));
     menu=await create.json();
-    const image=await makeRichMenuImage();
-    const upload=await fetch("https://api-data.line.me/v2/bot/richmenu/"+menu.richMenuId+"/content",{method:"POST",headers:{...headers,"Content-Type":"image/png"},body:image});
-    if(!upload.ok)throw new Error("LINE rich menu image "+upload.status+": "+(await upload.text()).slice(0,300));
   }
+  const image=await makeRichMenuImage();
+  const upload=await fetch("https://api-data.line.me/v2/bot/richmenu/"+menu.richMenuId+"/content",{method:"POST",headers:{...headers,"Content-Type":"image/png"},body:image});
+  if(!upload.ok)throw new Error("LINE rich menu image "+upload.status+": "+(await upload.text()).slice(0,300));
   const set=await fetch("https://api.line.me/v2/bot/user/all/richmenu/"+menu.richMenuId,{method:"POST",headers});
   if(!set.ok)throw new Error("LINE set default rich menu "+set.status+": "+(await set.text()).slice(0,300));
   await env.DB.prepare("INSERT INTO line_bot_settings(key,value) VALUES('rich_menu_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP").bind(menu.richMenuId).run();
