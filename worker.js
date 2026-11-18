@@ -119,8 +119,9 @@ async function normalizeSymbol(env,symbol) {
 async function getWatchlist(env,userId) {
   const r=await env.DB.prepare("SELECT symbol FROM watchlist WHERE user_id=? ORDER BY COALESCE(added_at,created_at),symbol").bind(userId).all();
   const raw=(r.results||[]).map(x=>cleanSymbol(x.symbol));
-  const normalized=await normalizeSymbols(env,raw);
-  // Repair legacy bare Thai tickers already stored before directory lookup succeeded.
+  // Watchlist symbols are normalized when added. Avoid a remote Thai-directory
+  // lookup on every list request; repair the one known legacy bare ticker locally.
+  const normalized=raw.map(s=>s==="UVAN"?"UVAN.BK":s);
   for(let i=0;i<raw.length;i++) {
     if(normalized[i]!==raw[i]) {
       await env.DB.prepare("UPDATE watchlist SET symbol=? WHERE user_id=? AND symbol=?").bind(normalized[i],userId,raw[i]).run();
@@ -311,6 +312,37 @@ function thaiStockFlexBubble(symbol) {
     {type:"text",text:"ยังไม่มีข้อมูล OHLC ฟรีที่ยืนยันได้ จึงไม่คำนวณ RSI/MACD/ADX หรือแจ้งเตือนสัญญาณ",size:"xs",color:"#A9B8CC",wrap:true,margin:"sm"}
   ]},footer:{type:"box",layout:"vertical",paddingAll:"12px",contents:[{type:"button",style:"primary",color:"#2877C7",action:{type:"uri",label:"เปิดกราฟ",uri:url}}]}};
 }
+function watchlistStatusBubble(symbol,state,dashboardUrl) {
+  const thai=isThaiSymbol(symbol),currency=thai?"฿":"$";
+  const price=Number(state?.last_price);
+  const priceText=Number.isFinite(price)&&price>0?currency+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
+  const status=state?.status_label||"รอข้อมูลสแกนรอบแรก";
+  const score=state?.score===null||state?.score===undefined?"—/5":Number(state.score)+"/5";
+  const checked=state?.checked_at?new Date(state.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอรอบสแกน";
+  const tone=state?.status==="buy"?"#16A36A":state?.status==="risk"?"#D94B59":"#D69B28";
+  return {
+    type:"bubble",size:"kilo",
+    header:{type:"box",layout:"horizontal",contents:[
+      {type:"text",text:symbol,weight:"bold",size:"xl",color:"#FFFFFF",flex:1},
+      {type:"text",text:thai?"THAI STOCK":"US STOCK",size:"xs",color:"#A9B8CC",align:"end",gravity:"center"}
+    ],backgroundColor:"#132238",paddingAll:"16px"},
+    body:{type:"box",layout:"vertical",spacing:"md",contents:[
+      {type:"text",text:priceText,size:"3xl",weight:"bold",color:"#FFFFFF"},
+      {type:"box",layout:"baseline",spacing:"sm",contents:[
+        {type:"text",text:"สถานะ",size:"sm",color:"#A9B8CC",flex:1},
+        {type:"text",text:status,size:"sm",weight:"bold",color:tone,wrap:true,flex:4}
+      ]},
+      {type:"box",layout:"baseline",spacing:"sm",contents:[
+        {type:"text",text:"คะแนน AI",size:"sm",color:"#A9B8CC",flex:1},
+        {type:"text",text:score,size:"sm",weight:"bold",color:"#FFFFFF",flex:4}
+      ]},
+      {type:"text",text:"ข้อมูลสถานะล่าสุด · "+checked,size:"xs",color:"#8293A9",wrap:true}
+    ],backgroundColor:"#0D1828",paddingAll:"16px"},
+    footer:{type:"box",layout:"vertical",contents:[
+      {type:"button",style:"primary",color:"#315FDB",action:{type:"uri",label:"เปิดกราฟและรายละเอียด",uri:dashboardUrl+"?symbol="+encodeURIComponent(symbol)+"&utm_source=line"}}
+    ],backgroundColor:"#0D1828",paddingAll:"12px"}
+  };
+}
 function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
   const thai=isThaiSymbol(symbol),currency=thai?"฿":"$";
   const price=Number(trade?.p);
@@ -490,19 +522,18 @@ async function handleLineWebhook(raw,signature,env) {
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
       const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
       try {
-        const [market,states]=await Promise.all([
-          fetchMarket(env,pageSymbols,"1Day"),
-          env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
-        ]);
+        // Read the saved watchlist state only. Do not wait for a fresh Alpaca
+        // history/trades request just to display the user's list in LINE.
+        const states=await env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all();
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
-        const bubbles=pageSymbols.map(symbol=>{const daily=market.stocks?.[symbol];return stockFlexBubble(symbol,daily?.trade,bySymbol.get(symbol),dashboard,daily?.bars||[],daily?.bars||[]);});
+        const bubbles=pageSymbols.map(symbol=>watchlistStatusBubble(symbol,bySymbol.get(symbol),dashboard));
         const messages=[{type:"flex",altText:"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount,contents:{type:"carousel",contents:bubbles}}];
         if(pageCount>1)messages.push({type:"text",text:"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”"});
         await linePushMessages(env,lineUserId,messages);
       } catch(e) {
         console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
-        try{await linePush(env,lineUserId,"โหลดข้อมูลหุ้นไม่สำเร็จ: "+String(e).slice(0,220)+"\\nกรุณาลองใหม่อีกครั้ง");}
+        try{await linePush(env,lineUserId,"โหลดรายชื่อหุ้นไม่สำเร็จ: "+String(e).slice(0,220)+"\\nกรุณาลองใหม่อีกครั้ง");}
         catch(pushError){console.error("LINE_WATCHLIST_PUSH_ERROR",String(pushError));}
       }
     } else if(cmd.action==="test") {
