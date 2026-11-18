@@ -45,14 +45,29 @@ async function verifySession(token,secret) {
     return payload.exp>Date.now()/1000?payload:null;
   } catch { return null; }
 }
+async function sha256Hex(value) {
+  const digest=await crypto.subtle.digest("SHA-256",encoder.encode(value));
+  return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");
+}
+function randomToken(bytes=32) {
+  const data=crypto.getRandomValues(new Uint8Array(bytes));
+  return base64url(data);
+}
+function randomPairCode() {
+  const alphabet="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const data=crypto.getRandomValues(new Uint8Array(10));
+  return Array.from(data,b=>alphabet[b&31]).join("");
+}
+async function ensureLinkTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS web_link_sessions (token_hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL UNIQUE, user_id INTEGER, expires_at INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
+}
 async function authenticate(request,env) {
-  if(!env.APP_SESSION_SECRET)return null;
   const auth=request.headers.get("Authorization")||"";
   const token=auth.startsWith("Bearer ")?auth.slice(7):"";
-  const payload=await verifySession(token,env.APP_SESSION_SECRET);
-  if(!payload?.sub)return null;
-  const user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE id=?").bind(payload.sub).first();
-  return user||null;
+  if(!token)return null;
+  const tokenHash=await sha256Hex(token);
+  const row=await env.DB.prepare("SELECT u.id,u.line_user_id,u.display_name FROM web_link_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?").bind(tokenHash,Math.floor(Date.now()/1000)).first();
+  return row||null;
 }
 async function lineIdTokenProfile(idToken,env) {
   if(!env.LINE_LOGIN_CHANNEL_ID)throw new Error("ยังไม่ได้ตั้ง LINE_LOGIN_CHANNEL_ID");
@@ -150,6 +165,7 @@ function parseLineCommand(text) {
   let m=t.match(/^(?:เพิ่ม|add|\/add)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"add",symbol:cleanSymbol(m[1])};
   m=t.match(/^(?:ลบ|remove|\/remove)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"remove",symbol:cleanSymbol(m[1])};
   m=t.match(/^(?:รายการหุ้น|รายชื่อหุ้น|ดูรายการหุ้น|ดูหุ้น|list|\/list)(?:\s+(\d+))?$/i); if(m)return {action:"list",page:Math.max(1,Number(m[1]||1))};
+  m=t.match(/^(?:เชื่อม|link)\s+([A-Z2-9]{8,12})$/i); if(m)return {action:"link",code:m[1].toUpperCase()};
   if(/^(?:หุ้นแนะนำ|แนะนำหุ้น|ideas|\/ideas)$/i.test(t))return {action:"ideas"};
   return {action:"help"};
 }
@@ -165,12 +181,22 @@ async function handleLineWebhook(request,env) {
     if(event.type==="unfollow")continue;
     const user=await createOrUpdateUser(env,lineUserId,{});
     if(event.type==="follow") {
-      await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\n\nพิมพ์ “เพิ่ม NVDA” เพื่อเพิ่มหุ้น (สูงสุด 50 ตัว)\nพิมพ์ “ลบ NVDA” เพื่อลบ\nพิมพ์ “รายการหุ้น” เพื่อดูรายการ\nพิมพ์ “หุ้นแนะนำ” เพื่อดูหุ้นที่ Screener จัดอันดับ");
+      await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\n\nพิมพ์ “เพิ่ม NVDA” เพื่อเพิ่มหุ้น (สูงสุด 50 ตัว)\nพิมพ์ “ลบ NVDA” เพื่อลบ\nพิมพ์ “รายการหุ้น” เพื่อดูรายการ\nพิมพ์ “หุ้นแนะนำ” เพื่อดูหุ้นที่ Screener จัดอันดับ\n\nเชื่อมเว็บ: เปิดเว็บ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ที่ได้ในแชตนี้");
       continue;
     }
     if(event.type!=="message"||event.message?.type!=="text")continue;
     const cmd=parseLineCommand(event.message.text);
-    if(cmd.action==="add") {
+    if(cmd.action==="link") {
+      const codeHash=await sha256Hex(cmd.code),now=Math.floor(Date.now()/1000);
+      const pending=await env.DB.prepare("SELECT code_hash FROM web_link_sessions WHERE code_hash=? AND user_id IS NULL AND expires_at>?").bind(codeHash,now).first();
+      if(!pending) {
+        await lineReply(env,event.replyToken,"這組連接碼無效或已過期。請回到網站重新產生連接碼，再輸入「เชื่อม รหัส」");
+      } else {
+        const linked=await env.DB.prepare("UPDATE web_link_sessions SET user_id=? WHERE code_hash=? AND user_id IS NULL AND expires_at>?").bind(user.id,codeHash,now).run();
+        if((linked.meta?.changes||0)>0)await lineReply(env,event.replyToken,"เชื่อมบัญชีสำเร็จแล้ว! เว็บนี้ใช้ Watchlist เดียวกับ LINE ของคุณได้แล้ว");
+        else await lineReply(env,event.replyToken,"รหัสนี้ถูกใช้ไปแล้ว กรุณาสร้างรหัสใหม่จากเว็บไซต์");
+      }
+    } else if(cmd.action==="add") {
       const result=await addWatch(env,user.id,cmd.symbol);
       await lineReply(env,event.replyToken,result.ok?"เพิ่ม "+cmd.symbol+" ใน Watchlist แล้ว ("+result.symbols.length+"/50)":result.error);
     } else if(cmd.action==="remove") {
@@ -340,6 +366,23 @@ async function scanAlerts(env) {
   }
 }
 async function apiHandler(request,env,url,headers) {
+  if(url.pathname==="/api/link/start"&&request.method==="POST") {
+    if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
+    await ensureLinkTable(env);
+    const token=randomToken(32),code=randomPairCode(),now=Math.floor(Date.now()/1000),expiresAt=now+600;
+    await env.DB.prepare("DELETE FROM web_link_sessions WHERE expires_at<=?").bind(now).run();
+    await env.DB.prepare("INSERT INTO web_link_sessions(token_hash,code_hash,expires_at) VALUES(?,?,?)").bind(await sha256Hex(token),await sha256Hex(code),expiresAt).run();
+    return json({token,code,expiresAt},200,headers);
+  }
+  if(url.pathname==="/api/link/status"&&request.method==="GET") {
+    if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
+    const auth=request.headers.get("Authorization")||"",token=auth.startsWith("Bearer ")?auth.slice(7):"";
+    if(!token)return json({error:"Missing link token"},401,headers);
+    const row=await env.DB.prepare("SELECT s.user_id,u.display_name FROM web_link_sessions s LEFT JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?").bind(await sha256Hex(token),Math.floor(Date.now()/1000)).first();
+    if(!row)return json({error:"รหัสเชื่อมเว็บหมดอายุ กรุณาสร้างรหัสใหม่"},401,headers);
+    if(!row.user_id)return json({linked:false},200,headers);
+    return json({linked:true,user:{displayName:row.display_name},symbols:await getWatchlist(env,row.user_id)},200,headers);
+  }
   if(url.pathname==="/api/auth/line"&&request.method==="POST") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
     if(!env.APP_SESSION_SECRET)return json({error:"APP_SESSION_SECRET missing"},503,headers);
