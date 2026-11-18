@@ -398,7 +398,7 @@ async function apiHandler(request,env,url,headers) {
     const rows=await env.DB.prepare("SELECT symbol,score,status,rationale FROM stock_ideas ORDER BY score DESC,symbol LIMIT 50").all();
     return json({ideas:rows.results||[]},200,headers);
   }
-  if(url.pathname.startsWith("/api/")&&url.pathname!=="/api/market"&&url.pathname!=="/api/assets") {
+  if(url.pathname.startsWith("/api/")&&!["/api/market","/api/assets","/api/signals","/api/quotes"].includes(url.pathname)) {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
     const user=await authenticate(request,env);if(!user)return json({error:"กรุณาเข้าสู่ระบบด้วย LINE ใหม่"},401,headers);
     if(url.pathname==="/api/me"&&request.method==="GET")return json({user:{displayName:user.display_name,pictureUrl:null},symbols:await getWatchlist(env,user.id)},200,headers);
