@@ -114,6 +114,96 @@ async function removeWatch(env,userId,symbol) {
   await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
   return {ok:true,symbols:await getWatchlist(env,userId)};
 }
+
+function richMenuFont() {
+  const rows={
+    A:"01110/10001/10001/11111/10001/10001/10001",B:"11110/10001/10001/11110/10001/10001/11110",
+    C:"01111/10000/10000/10000/10000/10000/01111",D:"11110/10001/10001/10001/10001/10001/11110",
+    E:"11111/10000/10000/11110/10000/10000/11111",F:"11111/10000/10000/11110/10000/10000/10000",
+    G:"01111/10000/10000/10111/10001/10001/01111",H:"10001/10001/10001/11111/10001/10001/10001",
+    I:"11111/00100/00100/00100/00100/00100/11111",J:"00111/00010/00010/00010/10010/10010/01100",
+    K:"10001/10010/10100/11000/10100/10010/10001",L:"10000/10000/10000/10000/10000/10000/11111",
+    M:"10001/11011/10101/10101/10001/10001/10001",N:"10001/11001/10101/10011/10001/10001/10001",
+    O:"01110/10001/10001/10001/10001/10001/01110",P:"11110/10001/10001/11110/10000/10000/10000",
+    Q:"01110/10001/10001/10001/10101/10010/01101",R:"11110/10001/10001/11110/10100/10010/10001",
+    S:"01111/10000/10000/01110/00001/00001/11110",T:"11111/00100/00100/00100/00100/00100/00100",
+    U:"10001/10001/10001/10001/10001/10001/01110",V:"10001/10001/10001/10001/10001/01010/00100",
+    W:"10001/10001/10001/10101/10101/10101/01010",X:"10001/10001/01010/00100/01010/10001/10001",
+    Y:"10001/10001/01010/00100/00100/00100/00100",Z:"11111/00001/00010/00100/01000/10000/11111",
+    " ":"00000/00000/00000/00000/00000/00000/00000"
+  };
+  return Object.fromEntries(Object.entries(rows).map(([k,v])=>[k,v.split("/").map(x=>x.split("").map(Number))]));
+}
+function richMenuPng() {
+  const w=2500,h=1686,pixels=new Uint8Array(w*h*3),font=richMenuFont();
+  const rgb=(x,y,c)=>{if(x<0||y<0||x>=w||y>=h)return;const i=(y*w+x)*3;pixels[i]=c[0];pixels[i+1]=c[1];pixels[i+2]=c[2];};
+  const rect=(x0,y0,x1,y1,c)=>{for(let y=Math.max(0,y0);y<Math.min(h,y1);y++)for(let x=Math.max(0,x0);x<Math.min(w,x1);x++)rgb(x,y,c);};
+  const disk=(cx,cy,r,c)=>{for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++)if(x*x+y*y<=r*r)rgb(cx+x,cy+y,c);};
+  const line=(x0,y0,x1,y1,c,t=16)=>{const dx=Math.abs(x1-x0),dy=Math.abs(y1-y0),sx=x0<x1?1:-1,sy=y0<y1?1:-1;let err=dx-dy,x=x0,y=y0;for(;;){disk(x,y,Math.floor(t/2),c);if(x===x1&&y===y1)break;const e=2*err;if(e>-dy){err-=dy;x+=sx;}if(e<dx){err+=dx;y+=sy;}}};
+  const text=(str,cx,top,scale,color)=>{const chars=[...str],cw=6*scale,total=chars.length*cw-scale,left=Math.round(cx-total/2);chars.forEach((ch,i)=>{const g=font[ch]||font[" "];g.forEach((row,yy)=>row.forEach((v,xx)=>{if(v)rect(left+i*cw+xx*scale,top+yy*scale,left+i*cw+(xx+1)*scale,top+(yy+1)*scale,color);}));});};
+  rect(0,0,w,h,[9,18,33]);
+  const labels=["MY WATCHLIST","ADD STOCK","REMOVE STOCK","BUY ZONE","AI PICKS","ALERTS"];
+  const accents=[[83,139,235],[49,177,139],[225,91,105],[58,159,207],[161,119,221],[220,165,69]];
+  const cw=Math.floor(w/3),ch=Math.floor(h/2),white=[240,246,255];
+  for(let i=0;i<6;i++){
+    const r=Math.floor(i/3),c=i%3,x0=c*cw,y0=r*ch,x1=(c+1)*cw,y1=(r+1)*ch,accent=accents[i];
+    rect(x0+22,y0+22,x1-22,y1-22,[17,33,55]);
+    rect(x0+22,y0+22,x1-22,y0+28,[35,56,82]);
+    rect(x0+22,y1-28,x1-22,y1-22,[35,56,82]);
+    const cx=Math.floor((x0+x1)/2),cy=y0+300;
+    disk(cx,cy,118,[Math.floor(accent[0]*.22),Math.floor(accent[1]*.22),Math.floor(accent[2]*.22)]);
+    for(let a=0;a<360;a+=1){const rad=a*Math.PI/180;rgb(Math.round(cx+114*Math.cos(rad)),Math.round(cy+114*Math.sin(rad)),accent);}
+    if(i===0){line(cx-58,cy+50,cx-58,cy-42,white);line(cx,cy+50,cx,cy-4,white);line(cx+58,cy+50,cx+58,cy-70,white);line(cx-78,cy+65,cx+78,cy+65,white);}
+    else if(i===1||i===2){line(cx-62,cy,cx+62,cy,white,20);if(i===1)line(cx,cy-62,cx,cy+62,white,20);}
+    else if(i===3){line(cx-70,cy+45,cx-22,cy-8,white);line(cx-22,cy-8,cx+14,cy+20,white);line(cx+14,cy+20,cx+70,cy-52,white);}
+    else if(i===4){disk(cx,cy,67,white);disk(cx,cy,45,[Math.floor(accent[0]*.22),Math.floor(accent[1]*.22),Math.floor(accent[2]*.22)]);line(cx-76,cy+76,cx-25,cy+24,white);line(cx-25,cy+24,cx+4,cy+42,white);line(cx+4,cy+42,cx+72,cy-38,white);}
+    else {disk(cx,cy-8,66,white);disk(cx,cy-8,48,[Math.floor(accent[0]*.22),Math.floor(accent[1]*.22),Math.floor(accent[2]*.22)]);rect(cx-15,cy+35,cx+16,cy+67,white);disk(cx,cy+80,14,white);line(cx,cy-95,cx,cy-75,white);line(cx-92,cy-42,cx-72,cy-32,white);line(cx+92,cy-42,cx+72,cy-32,white);}
+    text(labels[i],cx,y0+535,10,white);
+    text("AI STOCK WATCHER",cx,y0+640,4,[135,157,185]);
+  }
+  rect(cw-2,12,cw+2,h-12,[39,58,82]);rect(2*cw-2,12,2*cw+2,h-12,[39,58,82]);rect(12,ch-2,w-12,ch+2,[39,58,82]);
+  const raw=new Uint8Array(h*(1+w*3));let p=0;
+  for(let y=0;y<h;y++){raw[p++]=0;const start=y*w*3;raw.set(pixels.subarray(start,start+w*3),p);p+=w*3;}
+  return new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate"));
+}
+function pngChunk(type,data) {
+  const name=encoder.encode(type),out=new Uint8Array(12+data.length),view=new DataView(out.buffer);
+  view.setUint32(0,data.length);out.set(name,4);out.set(data,8);
+  let crc=0xffffffff;for(let i=4;i<8+data.length;i++){crc^=out[i];for(let j=0;j<8;j++)crc=(crc&1)?(crc>>>1)^0xedb88320:crc>>>1;}
+  view.setUint32(8+data.length,(crc^0xffffffff)>>>0);return out;
+}
+async function makeRichMenuImage() {
+  const compressed=new Uint8Array(await new Response(await richMenuPng()).arrayBuffer());
+  const ihdr=new Uint8Array(13),v=new DataView(ihdr.buffer);v.setUint32(0,2500);v.setUint32(4,1686);ihdr[8]=8;ihdr[9]=2;
+  const parts=[new Uint8Array([137,80,78,71,13,10,26,10]),pngChunk("IHDR",ihdr),pngChunk("IDAT",compressed),pngChunk("IEND",new Uint8Array())];
+  const size=parts.reduce((n,x)=>n+x.length,0),out=new Uint8Array(size);let off=0;for(const x of parts){out.set(x,off);off+=x.length;}return out;
+}
+async function ensureRichMenu(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS line_bot_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+  const saved=await env.DB.prepare("SELECT value FROM line_bot_settings WHERE key='rich_menu_id'").first();
+  if(saved?.value)return saved.value;
+  const headers={"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN};
+  const listRes=await fetch("https://api.line.me/v2/bot/richmenu/list",{headers});
+  if(!listRes.ok)throw new Error("LINE rich menu list "+listRes.status+": "+(await listRes.text()).slice(0,250));
+  const listed=await listRes.json();
+  let menu=(listed.richmenus||[]).find(x=>x.name==="AI Stock Watcher · 6 Buttons");
+  if(!menu){
+    const areas=[],actions=["ดูหุ้นของฉัน","เพิ่มหุ้น","ลบหุ้น","ราคาเข้าซื้อ","หุ้นน่าสนใจ","ตั้งค่าแจ้งเตือน"];
+    const widths=[833,834,833];
+    for(let i=0;i<6;i++){const row=Math.floor(i/3),col=i%3;const x=col===0?0:col===1?833:1667;areas.push({bounds:{x,y:row*843,width:widths[col],height:843},action:{type:"message",label:actions[i],text:actions[i]}});}
+    const create=await fetch("https://api.line.me/v2/bot/richmenu",{method:"POST",headers:{...headers,"Content-Type":"application/json"},body:JSON.stringify({size:{width:2500,height:1686},selected:true,name:"AI Stock Watcher · 6 Buttons",chatBarText:"เมนู AI Stock",areas})});
+    if(!create.ok)throw new Error("LINE rich menu create "+create.status+": "+(await create.text()).slice(0,300));
+    menu=await create.json();
+    const image=await makeRichMenuImage();
+    const upload=await fetch("https://api-data.line.me/v2/bot/richmenu/"+menu.richMenuId+"/content",{method:"POST",headers:{...headers,"Content-Type":"image/png"},body:image});
+    if(!upload.ok)throw new Error("LINE rich menu image "+upload.status+": "+(await upload.text()).slice(0,300));
+  }
+  const set=await fetch("https://api.line.me/v2/bot/user/all/richmenu/"+menu.richMenuId,{method:"POST",headers});
+  if(!set.ok)throw new Error("LINE set default rich menu "+set.status+": "+(await set.text()).slice(0,300));
+  await env.DB.prepare("INSERT INTO line_bot_settings(key,value) VALUES('rich_menu_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP").bind(menu.richMenuId).run();
+  return menu.richMenuId;
+}
+
 function lineMenuQuickReply(extra=[]) {
   const base=[
     ["ดูหุ้นของฉัน","ดูหุ้นของฉัน"],["เพิ่มหุ้น","เพิ่มหุ้น"],["ลบหุ้น","ลบหุ้น"],
@@ -123,13 +213,13 @@ function lineMenuQuickReply(extra=[]) {
 }
 async function lineReply(env,replyToken,text,quickReply=null) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
-  const message={type:"text",text:String(text).slice(0,4900),quickReply:quickReply||lineMenuQuickReply()};
+  const message={type:"text",text:String(text).slice(0,4900),...(quickReply?{quickReply}:{})};
   const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
   if(!r.ok)console.error("LINE_REPLY_FAILED",r.status,(await r.text()).slice(0,250));
 }
 async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist",quickReply=null) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return false;
-  const message={type:"flex",altText,contents,quickReply:lineMenuQuickReply(quickReply?.items||[])};
+  const message={type:"flex",altText,contents,...(quickReply?.items?.length?{quickReply:lineMenuQuickReply(quickReply.items)}:{})};
   try {
     const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
     if(r.ok)return true;
@@ -265,6 +355,7 @@ async function handleLineWebhook(request,env) {
   const raw=await request.arrayBuffer();
   if(!await verifyLineSignature(raw,request.headers.get("x-line-signature")||"",env.LINE_CHANNEL_SECRET))return json({error:"Invalid LINE signature"},401);
   let payload; try{payload=JSON.parse(new TextDecoder().decode(raw));}catch{return json({error:"Invalid JSON"},400);}
+  try { await ensureRichMenu(env); } catch(e) { console.error("LINE_RICH_MENU_SETUP_FAILED",String(e)); }
   for(const event of payload.events||[]) {
     const lineUserId=event.source?.userId;
     if(!lineUserId)continue;
