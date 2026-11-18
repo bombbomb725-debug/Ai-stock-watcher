@@ -788,13 +788,11 @@ async function apiHandler(request,env,url,headers) {
     const candidates=[...symbols];
     if(!candidates.length)return json({ideas:[],candidateCount:0,scannedCount:0,fetchedAt:new Date().toISOString()},200,headers);
     const market={};
-    for(let i=0;i<candidates.length;i+=50) {
-      try {
-        const batch=await fetchMarket(env,candidates.slice(i,i+50),"1Day");
-        Object.assign(market,batch.stocks||{});
-      } catch(e) {
-        console.error("SCREENER_MARKET_BATCH_ERROR",i,String(e));
-      }
+    const batches=await Promise.allSettled(Array.from({length:Math.ceil(candidates.length/50)},(_,i)=>fetchMarket(env,candidates.slice(i*50,(i+1)*50),"1Day")));
+    for(let i=0;i<batches.length;i++) {
+      const result=batches[i];
+      if(result.status==="fulfilled")Object.assign(market,result.value.stocks||{});
+      else console.error("SCREENER_MARKET_BATCH_ERROR",i,String(result.reason));
     }
     const ranked=[];
     for(const symbol of candidates) {
@@ -805,7 +803,8 @@ async function apiHandler(request,env,url,headers) {
       ranked.push({symbol,score:signal.score,status:signal.status,label:signal.label,price:Number.isFinite(price)?price:null,ema20:signal.ema20,ema50:signal.ema50,rsi:signal.rsi,macd:signal.macd,adx:signal.adx});
     }
     ranked.sort((a,b)=>b.score-a.score||(a.status==="buy"?-1:0)-(b.status==="buy"?-1:0)||a.symbol.localeCompare(b.symbol));
-    return json({ideas:ranked.slice(0,50),candidateCount:candidates.length,scannedCount:ranked.length,fetchedAt:new Date().toISOString(),universe:"Alpaca US most-active stocks + top gainers/losers"},200,headers);
+    const qualified=ranked.filter(x=>x.score>=4);
+    return json({ideas:qualified.slice(0,50),candidateCount:candidates.length,scannedCount:ranked.length,qualifiedCount:qualified.length,minScore:4,fetchedAt:new Date().toISOString(),universe:"Alpaca US most-active stocks + top gainers/losers"},200,headers);
   }
   if(url.pathname==="/api/ideas"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
