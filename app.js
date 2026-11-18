@@ -11,6 +11,7 @@ const $ = s => document.querySelector(s);
 const fmt = n => Number.isFinite(n) ? n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
 const state = {
   busy:false,
+  intradayBusy:false,
   symbols:loadSavedSymbols(),
   assets:[],
   market:{},
@@ -127,7 +128,7 @@ function chartSvg(bars,livePrice){
   const X=i=>30+i*(560/Math.max(1,rows.length-1)),Y=v=>12+(hi-v)/(hi-lo)*156;
   const path=a=>a.map((v,i)=>Number.isFinite(v)?(i&&Number.isFinite(a[i-1])?"L":"M")+X(i).toFixed(1)+","+Y(v).toFixed(1):"").join(" ");
   const last=cl.length-1;
-  return '<div class="chart-wrap"><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคาปิด</span><span>EMA20</span><span>EMA50</span></div></div>';
+  return '<div class="chart-wrap"><div class="chart-caption">กราฟระหว่างวัน · แท่ง 5 นาที · จุดปลายกราฟคือราคาซื้อขายล่าสุด</div><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคาปิด</span><span>EMA20</span><span>EMA50</span></div></div>';
 }
 function entryPlan(bars,a){
   const done=completedBars(bars,state.timeframe),atr=atrValue(done),e20=a.short;
@@ -153,7 +154,7 @@ function renderCard(symbol,item){
   const decisionHtml='<section class="decision '+decision.tone+'"><div class="decision-heading"><span>สรุปง่ายๆ</span><b>'+decision.label+'</b></div><p>'+decision.detail+'</p></section>';
   const planHtml=plan?`<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อเมื่อกลับตัวเป็นขาขึ้น</div><div class="entry-range">$${fmt(plan.low)} – $${fmt(plan.high)}</div><div class="entry-levels"><span>เป้าหมาย 2R <b>$${fmt(plan.target)}</b></span><span>จุดตัดขาดทุน <b>$${fmt(plan.stop)}</b></span></div><small>${a.confirmed?'แนวโน้มผ่านเงื่อนไขแล้ว รอราคาเข้ามาในโซนนี้ ไม่ไล่ซื้อ':'ระดับประมาณการล่วงหน้า ยังไม่ใช่สัญญาณซื้อ รอให้สถานะเป็นสีเขียวก่อน'}</small></section>`:"";
   const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH"):"ไม่พบรายการซื้อขายล่าสุด";
-  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(bars,price)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · ใช้แท่ง '+ (state.timeframe==="4Hour"?"4 ชั่วโมงที่ปิดแล้ว":"รายวันที่ปิดแล้ว") +' · IEX</div></article>';
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · ใช้แท่ง '+ (state.timeframe==="4Hour"?"4 ชั่วโมงที่ปิดแล้ว":"รายวันที่ปิดแล้ว") +' · IEX</div></article>';
 }
 function setStatus(msg,ok=false){
   $("#connection").textContent=msg;
@@ -238,6 +239,22 @@ function isUsRegularSession(){
   const minutes=Number(v.hour)*60+Number(v.minute);
   return v.weekday!=="Sat"&&v.weekday!=="Sun"&&minutes>=570&&minutes<960;
 }
+async function refreshIntradayBars(){
+  if(!isUsRegularSession()||document.hidden||state.busy||state.intradayBusy||!Object.keys(state.market).length)return;
+  const symbols=Object.keys(state.market);
+  state.intradayBusy=true;
+  try{
+    const data=await fetchMarket(symbols,"5Min");
+    for(const symbol of symbols){
+      if(!state.market[symbol]||!data[symbol])continue;
+      state.market[symbol].intradayBars=data[symbol].bars||state.market[symbol].intradayBars||[];
+      if(data[symbol].trade)state.market[symbol].trade=data[symbol].trade;
+    }
+    $("#cards").innerHTML=symbols.map(s=>state.market[s]?renderCard(s,state.market[s]):"").join("");
+    $("#updated").textContent="อัปเดตกราฟระหว่างวัน "+new Date().toLocaleTimeString("th-TH")+" · แท่ง 5 นาที";
+  }catch(e){console.warn("INTRADAY_BAR_REFRESH_FAILED",e);}
+  finally{state.intradayBusy=false;}
+}
 async function refreshLiveQuotes(){
   if(!isUsRegularSession()||document.hidden||state.busy||!Object.keys(state.market).length)return;
   const symbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
@@ -269,7 +286,9 @@ async function loadMarket(){
   try{
     if(!state.symbols.length){$("#cards").innerHTML='<article class="stock-card">ยังไม่มีหุ้นใน Watchlist ค้นหาและเพิ่มหุ้นได้ด้านบน</article>';return;}
     const displaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
-    state.market=await fetchMarket(displaySymbols);
+    const [dailyMarket,intradayMarket]=await Promise.all([fetchMarket(displaySymbols),fetchMarket(displaySymbols,"5Min")]);
+    state.market=dailyMarket;
+    for(const symbol of displaySymbols)if(state.market[symbol])state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
     $("#cards").innerHTML=displaySymbols.map(s=>state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+s+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>').join("");
     state.symbols.forEach(s=>{if(state.market[s])maybeNotify(s,state.market[s]);});
     const count=Object.values(state.market).reduce((n,x)=>n+(x.bars||[]).length,0);
@@ -345,4 +364,5 @@ renderIdeas();renderWatchlist();initializeAccount();
 
 /* Live price polling: Alpaca IEX latest trades every 15 seconds during US regular hours. */
 setInterval(refreshLiveQuotes,15000);
+setInterval(refreshIntradayBars,60000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshLiveQuotes();});
