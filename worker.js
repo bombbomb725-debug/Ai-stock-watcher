@@ -366,7 +366,7 @@ async function linePush(env,userId,text) {
   if(!r.ok)throw new Error("LINE push failed "+r.status+" "+(await r.text()).slice(0,200));
 }
 async function linePushMessages(env,userId,messages) {
-  const r=await fetch("https://api.line.me/v2/bot/message/push",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({to:userId,messages})});
+  const r=await fetch("https://api.line.me/v2/bot/message/push",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({to:userId,messages}),signal:AbortSignal.timeout(8000)});
   if(!r.ok)throw new Error("LINE push failed "+r.status+" "+(await r.text()).slice(0,250));
 }
 function parseSymbols(value) {
@@ -533,7 +533,7 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(fresh)return await fresh.json();
   const sid="set:"+symbol.replace(/\.BK$/i,"").toUpperCase();
   const url="https://api.datacedar.com/v3/stocks/"+encodeURIComponent(sid)+"/bars?timeframe="+tf+"&adjustment=raw&order=asc&limit=500";
-  const r=await fetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY}});
+  const r=await fetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(8000)});
   if(!r.ok){const detail=(await r.text()).slice(0,240),stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar API "+r.status+": "+detail+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw new Error("DataCedar API "+r.status+": "+detail);}
   const payload=await r.json();if(payload?.error)throw new Error(payload.error.message||"DataCedar API error");
   if(!Array.isArray(payload?.data))throw new Error("DataCedar response format invalid");
@@ -556,7 +556,7 @@ async function fetchYahooThaiLegacy(symbol,timeframe="1Day") {
   let payload=null,lastError=null;
   for(const host of ["query1.finance.yahoo.com","query2.finance.yahoo.com"])try{
     const url="https://"+host+"/v8/finance/chart/"+encodeURIComponent(symbol)+"?range="+range+"&interval="+interval+"&events=div%2Csplits";
-    const r=await fetch(url,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0 (compatible; AIStockWatcher/1.0)"},cf:{cacheTtl:ttl,cacheEverything:true}});
+    const r=await fetch(url,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0 (compatible; AIStockWatcher/1.0)"},cf:{cacheTtl:ttl,cacheEverything:true},signal:AbortSignal.timeout(7000)});
     if(!r.ok)throw new Error("Yahoo HTTP "+r.status);
     payload=await r.json();if(payload?.chart?.error)throw new Error(payload.chart.error.description||"Yahoo chart error");break;
   }catch(e){lastError=e;}
