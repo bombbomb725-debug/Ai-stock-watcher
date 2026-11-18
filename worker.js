@@ -874,7 +874,7 @@ async function apiHandler(request,env,url,headers) {
     if(url.pathname==="/api/watchlist/add"&&request.method==="POST") {
       const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol);
       if(!validSymbol(symbol))return json({error:"Ticker ไม่ถูกต้อง"},400,headers);
-      const result=await addWatch(env,user.id,symbol);if(result.ok&&!result.already&&user.line_user_id){try{await linePush(env,user.line_user_id,"AI Stock Watcher · เพิ่มหุ้นจากเว็บไซต์สำเร็จ ✓\\n"+symbol+" ถูกบันทึกใน Watchlist LINE และเว็บแล้ว\\nรายการปัจจุบัน "+result.symbols.length+"/50");}catch(e){console.error("WEB_ADD_LINE_CONFIRMATION_FAILED",String(e));}}return json({...result,lineSynced:result.ok},result.ok?200:409,headers);
+      const result=await addWatch(env,user.id,symbol);let lineNotified=false;if(result.ok&&!result.already&&user.line_user_id){try{await linePush(env,user.line_user_id,"AI Stock Watcher · เพิ่มหุ้นจากเว็บไซต์สำเร็จ ✓\\n"+symbol+" ถูกบันทึกใน Watchlist บัญชี LINE และเว็บเดียวกันแล้ว\\nรายการปัจจุบัน "+result.symbols.length+"/50");lineNotified=true;}catch(e){console.error("WEB_ADD_LINE_CONFIRMATION_FAILED",String(e));}}return json({...result,lineSynced:result.ok,lineNotified},result.ok?200:409,headers);
     }
     if(url.pathname==="/api/watchlist/remove"&&request.method==="POST") {
       const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol);
