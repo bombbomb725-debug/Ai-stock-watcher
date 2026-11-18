@@ -782,8 +782,8 @@ async function apiHandler(request,env,url,headers) {
     if(!payloads.length)return json({error:"Alpaca Screener ใช้งานไม่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"},502,headers);
     const symbols=new Set();
     for(const p of payloads) {
-      for(const x of p.most_actives||[])if(/^[A-Z]{1,5}(?:\\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
-      for(const x of [...(p.gainers||[]),...(p.losers||[])])if(/^[A-Z]{1,5}(?:\\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
+      for(const x of p.most_actives||[])if(/^[A-Z]{1,5}(?:\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
+      for(const x of [...(p.gainers||[]),...(p.losers||[])])if(/^[A-Z]{1,5}(?:\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
     }
     const candidates=[...symbols];
     if(!candidates.length)return json({ideas:[],candidateCount:0,scannedCount:0,fetchedAt:new Date().toISOString()},200,headers);
