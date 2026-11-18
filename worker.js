@@ -597,7 +597,7 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(fresh)return await fresh.json();
   const sid="set:"+symbol.replace(/\.BK$/i,"").toUpperCase();
   const url="https://api.datacedar.com/v3/stocks/"+encodeURIComponent(sid)+"/bars?timeframe="+tf+"&adjustment=raw&order=asc&limit=500";
-  let r;try{r=await fetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(15000)});}catch(e){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar timeout/network: "+String(e)+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw e;}
+  let r;try{r=await fetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(4500)});}catch(e){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar timeout/network: "+String(e)+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw e;}
   if(!r.ok){const detail=(await r.text()).slice(0,240),stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar API "+r.status+": "+detail+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw new Error("DataCedar API "+r.status+": "+detail);}
   const payload=await r.json();if(payload?.error)throw new Error(payload.error.message||"DataCedar API error");
   if(!Array.isArray(payload?.data))throw new Error("DataCedar response format invalid");
@@ -618,9 +618,9 @@ async function fetchYahooThaiLegacy(symbol,timeframe="1Day") {
   const freshKey=new Request(cacheId+"/fresh"),staleKey=new Request(cacheId+"/stale"),fresh=await cache.match(freshKey);
   if(fresh)return await fresh.json();
   let payload=null,lastError=null;
-  for(const host of ["query1.finance.yahoo.com","query2.finance.yahoo.com"])try{
+  for(const host of ["query1.finance.yahoo.com"])try{
     const url="https://"+host+"/v8/finance/chart/"+encodeURIComponent(symbol)+"?range="+range+"&interval="+interval+"&events=div%2Csplits";
-    const r=await fetch(url,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0 (compatible; AIStockWatcher/1.0)"},cf:{cacheTtl:ttl,cacheEverything:true},signal:AbortSignal.timeout(7000)});
+    const r=await fetch(url,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0 (compatible; AIStockWatcher/1.0)"},cf:{cacheTtl:ttl,cacheEverything:true},signal:AbortSignal.timeout(3500)});
     if(!r.ok)throw new Error("Yahoo HTTP "+r.status);
     payload=await r.json();if(payload?.chart?.error)throw new Error(payload.chart.error.description||"Yahoo chart error");break;
   }catch(e){lastError=e;}
