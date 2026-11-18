@@ -6,7 +6,7 @@ compatibility_date = "2026-10-01"
 ALLOWED_ORIGIN = "https://bombbomb725-debug.github.io"
 
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["* * * * *"]
 
 [[d1_databases]]
 binding = "DB"
