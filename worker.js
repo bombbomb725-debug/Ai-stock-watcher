@@ -236,10 +236,17 @@ async function linePush(env,userId,text) {
   const r=await fetch("https://api.line.me/v2/bot/message/push",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({to:userId,messages:[{type:"text",text:String(text).slice(0,4900)}]})});
   if(!r.ok)throw new Error("LINE push failed "+r.status+" "+(await r.text()).slice(0,200));
 }
+function parseSymbols(value) {
+  const raw=String(value||"").trim().split(/[\\s,，;；]+/).filter(Boolean).map(cleanSymbol);
+  if(!raw.length||raw.some(x=>!validSymbol(x)))return null;
+  return [...new Set(raw)];
+}
 function parseLineCommand(text) {
   const t=String(text||"").trim();
-  let m=t.match(/^(?:เพิ่ม|add|\/add)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"add",symbol:cleanSymbol(m[1])};
-  m=t.match(/^(?:ลบ|remove|\/remove)\s+([A-Za-z][A-Za-z0-9.]{0,9})$/i); if(m)return {action:"remove",symbol:cleanSymbol(m[1])};
+  let m=t.match(/^(?:เพิ่ม|add|\/add)\\s+(.+)$/i);
+  if(m){const symbols=parseSymbols(m[1]);return symbols?{action:"add",symbols}:{action:"invalid_symbols"};}
+  m=t.match(/^(?:ลบ|remove|\/remove)\\s+(.+)$/i);
+  if(m){const symbols=parseSymbols(m[1]);return symbols?{action:"remove",symbols}:{action:"invalid_symbols"};}
   m=t.match(/^(?:รายการหุ้น|รายชื่อหุ้น|ดูรายการหุ้น|ดูหุ้น|list|\/list)(?:\s+(\d+))?$/i); if(m)return {action:"list",page:Math.max(1,Number(m[1]||1))};
   m=t.match(/^(?:เชื่อม|link)\s+([A-Z2-9]{8,12})$/i); if(m)return {action:"link",code:m[1].toUpperCase()};
   if(/^(?:ทดสอบแจ้งเตือน|ทดสอบการแจ้งเตือน|test alert|\/test-alert)$/i.test(t))return {action:"test"};
@@ -268,7 +275,13 @@ async function handleLineWebhook(request,env) {
       continue;
     }
     if(event.type!=="message"||event.message?.type!=="text")continue;
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_input_modes (user_id INTEGER PRIMARY KEY, mode TEXT NOT NULL, expires_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
+    const inputMode=await env.DB.prepare("SELECT mode FROM user_input_modes WHERE user_id=? AND expires_at>?").bind(user.id,Math.floor(Date.now()/1000)).first();
     const cmd=parseLineCommand(event.message.text);
+    if(inputMode && !["link","add_prompt","remove_menu","settings","alert_on","alert_off","list","ideas","test"].includes(cmd.action)) {
+      const symbols=parseSymbols(event.message.text);
+      if(symbols)cmd.action=inputMode.mode==="add"?"add":"remove",cmd.symbols=symbols;
+    }
     if(cmd.action==="link") {
       const codeHash=await sha256Hex(cmd.code),now=Math.floor(Date.now()/1000);
       const pending=await env.DB.prepare("SELECT code_hash FROM web_link_sessions WHERE code_hash=? AND user_id IS NULL AND code_expires_at>?").bind(codeHash,now).first();
@@ -280,14 +293,15 @@ async function handleLineWebhook(request,env) {
         else await lineReply(env,event.replyToken,"รหัสนี้ถูกใช้ไปแล้ว กรุณาสร้างรหัสใหม่จากเว็บไซต์");
       }
     } else if(cmd.action==="add_prompt") {
-      const picks=["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","MSFT"].map(symbol=>({type:"action",action:{type:"message",label:symbol,text:"เพิ่ม "+symbol}}));
-      await lineReply(env,event.replyToken,"เลือกหุ้นยอดนิยมจากปุ่ม หรือพิมพ์คำสั่ง “เพิ่ม NVDA” โดยเปลี่ยนเป็น Symbol ที่ต้องการ (สูงสุด 50 หุ้น)",lineMenuQuickReply(picks));
+      await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"add",Math.floor(Date.now()/1000)+600).run();
+      await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการเพิ่มได้เลย เช่น\nAMZN\nหรือหลายตัว: AMZN NVDA\nหรือคั่นด้วยจุลภาค: AMZN,NVDA\nหมดเวลารับรายการใน 10 นาที");
     } else if(cmd.action==="remove_menu") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length)await lineReply(env,event.replyToken,"Watchlist ยังว่าง ไม่มีหุ้นให้ลบ");
       else {
+        await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"remove",Math.floor(Date.now()/1000)+600).run();
         const picks=symbols.slice(0,7).map(symbol=>({type:"action",action:{type:"message",label:"ลบ "+symbol,text:"ลบ "+symbol}}));
-        await lineReply(env,event.replyToken,"แตะหุ้นที่ต้องการลบจาก Watchlist ("+symbols.length+" หุ้น)"+(symbols.length>7?" · แสดง 7 ตัวแรก":"") ,lineMenuQuickReply(picks));
+        await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการลบได้เลย เช่น AMZN NVDA หรือ AMZN,NVDA หรือแตะปุ่มหุ้นด้านล่าง ("+symbols.length+" หุ้น)",lineMenuQuickReply(picks));
       }
     } else if(cmd.action==="settings") {
       await lineReply(env,event.replyToken,"ตั้งค่าแจ้งเตือนสถานะหุ้น\nเลือกเปิดหรือปิดการแจ้งเตือนการเปลี่ยนสถานะได้จากปุ่มด้านล่าง",lineMenuQuickReply([
@@ -299,12 +313,25 @@ async function handleLineWebhook(request,env) {
       const enabled=cmd.action==="alert_on"?1:0;
       await env.DB.prepare("INSERT INTO user_preferences(user_id,alerts_enabled) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET alerts_enabled=excluded.alerts_enabled,updated_at=CURRENT_TIMESTAMP").bind(user.id,enabled).run();
       await lineReply(env,event.replyToken,enabled?"เปิดแจ้งเตือนการเปลี่ยนสถานะแล้ว":"ปิดแจ้งเตือนการเปลี่ยนสถานะแล้ว");
-    } else if(cmd.action==="add") {
-      const result=await addWatch(env,user.id,cmd.symbol);
-      await lineReply(env,event.replyToken,result.ok?"เพิ่ม "+cmd.symbol+" ใน Watchlist แล้ว ("+result.symbols.length+"/50)":result.error);
-    } else if(cmd.action==="remove") {
-      const result=await removeWatch(env,user.id,cmd.symbol);
-      await lineReply(env,event.replyToken,"ลบ "+cmd.symbol+" ออกจาก Watchlist แล้ว\nเหลือ "+result.symbols.length+" หุ้น");
+    } else if(cmd.action==="invalid_symbols") {
+      await lineReply(env,event.replyToken,"รูปแบบตัวย่อไม่ถูกต้อง กรุณาส่งเช่น AMZN หรือ AMZN NVDA หรือ AMZN,NVDA");
+    } else if(cmd.action==="add"||cmd.action==="remove") {
+      const symbols=cmd.symbols||[];
+      const results=[];
+      for(const symbol of symbols) {
+        if(cmd.action==="add") {
+          const result=await addWatch(env,user.id,symbol);
+          results.push(result.ok?(result.already?"มี "+symbol+" อยู่แล้ว":"เพิ่ม "+symbol+" สำเร็จ"):"เพิ่ม "+symbol+" ไม่สำเร็จ: "+result.error);
+        } else {
+          const before=await getWatchlist(env,user.id);
+          if(!before.includes(symbol))results.push("ไม่พบ "+symbol+" ใน Watchlist");
+          else {const result=await removeWatch(env,user.id,symbol);results.push("ลบ "+symbol+" สำเร็จ · เหลือ "+result.symbols.length+" หุ้น");}
+        }
+      }
+      await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=?").bind(user.id).run();
+      const current=await getWatchlist(env,user.id);
+      await lineReply(env,event.replyToken,results.join("\\n")+"\\n\\nWatchlist ปัจจุบัน "+current.length+"/50 หุ้น");
+    }
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length) {
