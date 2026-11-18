@@ -149,7 +149,30 @@ function stockChartImageUrl(bars) {
   const url="https://quickchart.io/chart?width=600&height=220&format=png&c="+encodeURIComponent(JSON.stringify(config));
   return url.length<=2000?url:null;
 }
-function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[]) {
+function stockEntryPlan(bars) {
+  const last=bars[bars.length-1];
+  const nyDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+  const done=last?.t&&nyDate(new Date(last.t))===nyDate(new Date())?bars.slice(0,-1):bars;
+  const closes=done.map(b=>Number(b.c)).filter(Number.isFinite);
+  if(closes.length<20)return null;
+  const e20=ema(closes,20);
+  if(!Number.isFinite(e20))return null;
+  const tr=[];
+  for(let i=1;i<done.length;i++){
+    const h=Number(done[i].h),l=Number(done[i].l),pc=Number(done[i-1].c);
+    if([h,l,pc].every(Number.isFinite))tr.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
+  }
+  if(tr.length<14)return null;
+  const atr=tr.slice(-14).reduce((a,b)=>a+b,0)/14;
+  const lows=done.slice(-20).map(b=>Number(b.l)).filter(Number.isFinite);
+  const support=lows.length?Math.min(...lows):e20-atr;
+  const low=Math.max(e20-.35*atr,e20*.985);
+  const high=e20+.15*atr;
+  const stop=Math.min(support,e20-1.2*atr);
+  const risk=Math.max(high-stop,atr*.5);
+  return {low,high,stop,target:high+2*risk};
+}
+function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
   const price=Number(trade?.p);
   const priceText=Number.isFinite(price)?"$"+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
   const status=state?.status_label||"กำลังรอผลวิเคราะห์";
@@ -157,6 +180,8 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[]) {
   const checked=state?.checked_at?new Date(state.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอรอบสแกน";
   const tone=state?.status==="buy"?"#16A36A":state?.status==="risk"?"#D94B59":"#D69B28";
   const chartUrl=stockChartImageUrl(bars);
+  const plan=stockEntryPlan(dailyBars);
+  const money=n=>"$"+Number(n).toFixed(2);
   const contents=[];
   if(chartUrl)contents.push({type:"image",url:chartUrl,size:"full",aspectRatio:"20:7",aspectMode:"fit"});
   contents.push(
@@ -171,6 +196,23 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[]) {
     ]},
     {type:"text",text:"กราฟราคา 5 นาที · อัปเดตสัญญาณ: "+checked,size:"xs",color:"#8293A9",wrap:true}
   );
+  if(plan)contents.push(
+    {type:"separator",margin:"md",color:"#314158"},
+    {type:"text",text:"โซนราคาเฝ้ารอเข้าซื้อ (กรอบรายวัน)",size:"sm",weight:"bold",color:"#FFFFFF"},
+    {type:"text",text:money(plan.low)+" – "+money(plan.high),size:"xl",weight:"bold",color:"#69C79A"},
+    {type:"box",layout:"horizontal",spacing:"md",contents:[
+      {type:"box",layout:"vertical",flex:1,contents:[
+        {type:"text",text:"เป้าหมาย 2R",size:"xs",color:"#A9B8CC"},
+        {type:"text",text:money(plan.target),size:"sm",weight:"bold",color:"#69C79A"}
+      ]},
+      {type:"box",layout:"vertical",flex:1,contents:[
+        {type:"text",text:"จุดตัดขาดทุน",size:"xs",color:"#A9B8CC"},
+        {type:"text",text:money(plan.stop),size:"sm",weight:"bold",color:"#F08080"}
+      ]}
+    ]},
+    {type:"text",text:"ราคาอ้างอิงจากแท่งรายวันที่ปิดแล้ว · เป็นโซนประมาณการ ไม่ใช่คำสั่งซื้อ",size:"xs",color:"#8293A9",wrap:true}
+  );
+  else contents.push({type:"text",text:"ข้อมูลรายวันยังไม่พอคำนวณโซนเข้าซื้อ",size:"xs",color:"#D69B28",wrap:true});
   return {
     type:"bubble",size:"kilo",
     header:{type:"box",layout:"horizontal",contents:[
@@ -238,13 +280,14 @@ async function handleLineWebhook(request,env) {
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
       const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
       try {
-        const [market,states]=await Promise.all([
+        const [market,dailyMarket,states]=await Promise.all([
           fetchMarket(env,pageSymbols,"5Min"),
+          fetchMarket(env,pageSymbols,"1Day"),
           env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
         ]);
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
-        const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[]));
+        const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[],dailyMarket.stocks?.[symbol]?.bars||[]));
         const quickItems=[];
         if(page>1)quickItems.push({type:"action",action:{type:"message",label:"หน้า "+(page-1),text:"รายการหุ้น "+(page-1)}});
         if(page<pageCount)quickItems.push({type:"action",action:{type:"message",label:"หน้าถัดไป",text:"รายการหุ้น "+(page+1)}});
