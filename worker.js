@@ -828,9 +828,16 @@ async function apiHandler(request,env,url,headers) {
   return json({error:"Not found"},404,headers);
 }
 export default {
-  async fetch(request,env) {
+  async fetch(request,env,ctx) {
     const url=new URL(request.url),origin=request.headers.get("Origin")||"",headers=corsHeaders(origin);
-    if(url.pathname==="/line/webhook")return request.method==="POST"?handleLineWebhook(request,env):json({error:"Method not allowed"},405);
+    if(url.pathname==="/line/webhook") {
+      if(request.method!=="POST")return json({error:"Method not allowed"},405);
+      // Acknowledge LINE immediately; process commands and market-data calls in the background.
+      ctx.waitUntil(handleLineWebhook(request.clone(),env).then(result=>{
+        if(result.status>=400)console.error("LINE_WEBHOOK_BACKGROUND_FAILED",result.status);
+      }).catch(error=>console.error("LINE_WEBHOOK_BACKGROUND_ERROR",String(error))));
+      return json({ok:true});
+    }
     if(request.method==="OPTIONS")return origin&&!ALLOWED_ORIGINS.has(origin)?json({error:"Origin not allowed"},403,headers):new Response(null,{status:204,headers});
     if(origin&&!ALLOWED_ORIGINS.has(origin))return json({error:"Origin not allowed",origin},403,headers);
     if(url.pathname==="/"&&request.method==="GET")return json({service:"AI Stock Watcher API",status:"ready",multiUser:true,d1:dbReady(env),maxWatchlist:MAX_WATCHLIST,feed:"Alpaca IEX + DataCedar (Yahoo fallback)",scheduledScan:"* * * * *"},200,headers);
