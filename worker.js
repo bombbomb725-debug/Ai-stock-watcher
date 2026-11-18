@@ -104,9 +104,11 @@ async function lineReply(env,replyToken,text) {
   const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[{type:"text",text:String(text).slice(0,4900)}]})});
   if(!r.ok)console.error("LINE_REPLY_FAILED",r.status,(await r.text()).slice(0,250));
 }
-async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist") {
+async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist",quickReply=null) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
-  const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[{type:"flex",altText,contents}]})});
+  const message={type:"flex",altText,contents};
+  if(quickReply)message.quickReply=quickReply;
+  const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
   if(!r.ok)console.error("LINE_FLEX_REPLY_FAILED",r.status,(await r.text()).slice(0,400));
 }
 function stockFlexBubble(symbol,trade,state,dashboardUrl) {
@@ -190,11 +192,11 @@ async function handleLineWebhook(request,env) {
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
         const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,trades[symbol],bySymbol.get(symbol),dashboard));
-        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
-        if(pageCount>1) {
-          const next=page<pageCount?"พิมพ์ “รายการหุ้น "+(page+1)+"” เพื่อดูหน้าถัดไป":"พิมพ์ “รายการหุ้น 1” เพื่อกลับหน้าแรก";
-          await linePush(env,lineUserId,"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount+"\n"+next);
-        }
+        const quickItems=[];
+        if(page>1)quickItems.push({type:"action",action:{type:"message",label:"หน้า "+(page-1),text:"รายการหุ้น "+(page-1)}});
+        if(page<pageCount)quickItems.push({type:"action",action:{type:"message",label:"หน้าถัดไป",text:"รายการหุ้น "+(page+1)}});
+        quickItems.push({type:"action",action:{type:"message",label:"รีเฟรชราคา",text:"รายการหุ้น "+page}});
+        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount,quickItems.length?{items:quickItems}:null);
       } catch(e) {
         console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
         await lineReply(env,event.replyToken,"แสดงการ์ดหุ้นไม่สำเร็จ: "+String(e).slice(0,180));
