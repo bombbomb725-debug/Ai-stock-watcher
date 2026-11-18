@@ -235,6 +235,26 @@ async function startLinePairing() {
   showPairingCode(code);
   setTimeout(pollLineLink,1200);
 }
+async function syncSharedWatchlist() {
+  if(!state.shared||state.busy)return;
+  try {
+    const data=await apiRequest("/api/me");
+    const next=data.symbols||[];
+    if(JSON.stringify(next)!==JSON.stringify(state.symbols)) {
+      state.symbols=next;
+      saveSymbols();
+      renderWatchlist();
+      loadMarket();
+    }
+  } catch(e) {
+    if(e.message.includes("เข้าสู่ระบบ")) {
+      state.shared=false;
+      state.user=null;
+      renderWatchlist();
+      $("#accountStatus").textContent="เซสชันหมดอายุ กรุณาเชื่อม LINE ใหม่";
+    }
+  }
+}
 async function initializeAccount() {
   state.user=null;
   renderWatchlist();
@@ -441,4 +461,5 @@ renderIdeas();renderWatchlist();initializeAccount();
 /* Live price polling: Alpaca IEX latest trades every 15 seconds during US regular hours. */
 setInterval(refreshLiveQuotes,15000);
 setInterval(refreshIntradayBars,60000);
+setInterval(syncSharedWatchlist,10000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshLiveQuotes();});
