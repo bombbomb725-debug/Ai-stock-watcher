@@ -118,19 +118,10 @@ async function normalizeSymbol(env,symbol) {
   return (await normalizeSymbols(env,[symbol]))[0]||cleanSymbol(symbol);
 }
 async function getWatchlist(env,userId) {
-  const r=await env.DB.prepare("SELECT symbol,COALESCE(added_at,created_at) AS added_at FROM watchlist WHERE user_id=? ORDER BY COALESCE(added_at,created_at),symbol").bind(userId).all();
-  const rows=r.results||[],normalized=await normalizeSymbols(env,rows.map(x=>x.symbol));
-  for(let i=0;i<rows.length;i++) {
-    const old=rows[i].symbol,next=normalized[i];
-    if(old===next)continue;
-    const exists=await env.DB.prepare("SELECT 1 AS yes FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,next).first();
-    if(exists)await env.DB.prepare("DELETE FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,old).run();
-    else await env.DB.prepare("UPDATE watchlist SET symbol=? WHERE user_id=? AND symbol=?").bind(next,userId,old).run();
-    const state=await env.DB.prepare("SELECT 1 AS yes FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,next).first();
-    if(state)await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,old).run();
-    else await env.DB.prepare("UPDATE user_stock_state SET symbol=? WHERE user_id=? AND symbol=?").bind(next,userId,old).run();
-  }
-  return [...new Set(normalized)];
+  // Symbols are normalized when added/removed; reading a saved watchlist must not
+  // wait for the external Thai securities directory on every LINE request.
+  const r=await env.DB.prepare("SELECT symbol FROM watchlist WHERE user_id=? ORDER BY COALESCE(added_at,created_at),symbol").bind(userId).all();
+  return [...new Set((r.results||[]).map(x=>cleanSymbol(x.symbol)))];
 }
 async function addWatch(env,userId,symbol) {
   symbol=await normalizeSymbol(env,symbol);
@@ -340,7 +331,7 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
       {type:"text",text:score,size:"sm",weight:"bold",color:"#FFFFFF",flex:4}
     ]},
     {type:"text",text:"EMA20/50 "+(Number.isFinite(detail.ema20)?detail.ema20.toFixed(2):"—")+" / "+(Number.isFinite(detail.ema50)?detail.ema50.toFixed(2):"—")+" · RSI14 "+(Number.isFinite(detail.rsi)?detail.rsi.toFixed(1):"—")+" · MACD "+(Number.isFinite(detail.macd)?detail.macd.toFixed(3):"—")+" · ADX14 "+(Number.isFinite(detail.adx)?detail.adx.toFixed(1):"—"),size:"xs",color:"#A9B8CC",wrap:true},
-    {type:"text",text:(thai?"ราคาอ้างอิง DataCedar · ราคาปิดรายวัน":"กราฟราคา 5 นาที · Alpaca IEX")+" · อัปเดตสัญญาณ: "+checked,size:"xs",color:"#8293A9",wrap:true}
+    {type:"text",text:(thai?"ราคาอ้างอิง DataCedar · ราคาปิดรายวัน":"กราฟราคาและข้อมูลรายวัน · Alpaca IEX")+" · อัปเดตสัญญาณ: "+checked,size:"xs",color:"#8293A9",wrap:true}
   );
   if(plan)contents.push(
     {type:"separator",margin:"md",color:"#314158"},
@@ -483,14 +474,13 @@ async function handleLineWebhook(request,env) {
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
       const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
       try {
-        const [market,dailyMarket,states]=await Promise.all([
-          fetchMarket(env,pageSymbols,"5Min"),
+        const [market,states]=await Promise.all([
           fetchMarket(env,pageSymbols,"1Day"),
           env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
         ]);
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
-        const bubbles=pageSymbols.map(symbol=>{const intraday=market.stocks?.[symbol],daily=dailyMarket.stocks?.[symbol],thai=isThaiSymbol(symbol);const latestTrade=intraday?.trade||(thai?daily?.trade:null);return stockFlexBubble(symbol,latestTrade,bySymbol.get(symbol),dashboard,intraday?.bars||[],daily?.bars||[]);});
+        const bubbles=pageSymbols.map(symbol=>{const daily=market.stocks?.[symbol];return stockFlexBubble(symbol,daily?.trade,bySymbol.get(symbol),dashboard,daily?.bars||[],daily?.bars||[]);});
         await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
         if(pageCount>1)await lineReply(env,event.replyToken,"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”");
       } catch(e) {
