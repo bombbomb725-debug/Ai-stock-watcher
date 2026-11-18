@@ -15,7 +15,7 @@ const state = {
   symbols:loadSavedSymbols(),
   assets:[],
   market:{},
-  timeframe:localStorage.getItem("stockWatcherTimeframe")||"1Day",
+  timeframe:"1Day",
   apiUrl:localStorage.getItem("stockWatcherApiUrl") || "https://ai-stock-watcher-api.bombbomb725.workers.dev",
   sessionToken:sessionStorage.getItem("stockWatcherSessionToken")||"",
   user:null,
@@ -142,7 +142,15 @@ function entryPlan(bars,a){
   return {low,high,stop,target:high+2*risk};
 }
 function renderCard(symbol,item){
-  const bars=item.bars||[],price=Number(item.trade?.p),a=analyze(bars,price),plan=entryPlan(bars,a);
+  const bars=item.bars||[],price=Number(item.trade?.p),a=analyze(bars,price);
+  if(item.signal){
+    a.kind=item.signal.status||a.kind;
+    a.signal=item.signal.status_label||a.signal;
+    a.score=Number.isFinite(Number(item.signal.score))?Number(item.signal.score):a.score;
+    a.confirmed=a.kind==="buy";
+    a.strong=String(a.signal).includes("เบรกเอาต์");
+  }
+  const plan=entryPlan(bars,a);
   const prev=bars.length>1?Number(bars[bars.length-2].c):NaN;
   const change=Number.isFinite(price)&&Number.isFinite(prev)&&prev!==0?(price-prev)/prev*100:null;
   const cls=change===null?"neutral":change>=0?"positive":"negative";
@@ -154,7 +162,7 @@ function renderCard(symbol,item){
   const decisionHtml='<section class="decision '+decision.tone+'"><div class="decision-heading"><span>สรุปง่ายๆ</span><b>'+decision.label+'</b></div><p>'+decision.detail+'</p></section>';
   const planHtml=plan?`<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อเมื่อกลับตัวเป็นขาขึ้น</div><div class="entry-range">$${fmt(plan.low)} – $${fmt(plan.high)}</div><div class="entry-levels"><span>เป้าหมาย 2R <b>$${fmt(plan.target)}</b></span><span>จุดตัดขาดทุน <b>$${fmt(plan.stop)}</b></span></div><small>${a.confirmed?'แนวโน้มผ่านเงื่อนไขแล้ว รอราคาเข้ามาในโซนนี้ ไม่ไล่ซื้อ':'ระดับประมาณการล่วงหน้า ยังไม่ใช่สัญญาณซื้อ รอให้สถานะเป็นสีเขียวก่อน'}</small></section>`:"";
   const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH"):"ไม่พบรายการซื้อขายล่าสุด";
-  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · ใช้แท่ง '+ (state.timeframe==="4Hour"?"4 ชั่วโมงที่ปิดแล้ว":"รายวันที่ปิดแล้ว") +' · IEX</div></article>';
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · สถานะ/คะแนนอิงผลสแกน 1D '+(item.signal?.checked_at?new Date(item.signal.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอผลสแกน")+' · IEX</div></article>';
 }
 function setStatus(msg,ok=false){
   $("#connection").textContent=msg;
@@ -226,6 +234,13 @@ async function fetchMarket(symbols,timeframe=state.timeframe){
   }
   return result;
 }
+async function fetchSignals(symbols){
+  const url=state.apiUrl.replace(/\/$/,"")+"/api/signals?symbols="+encodeURIComponent(symbols.join(","));
+  const response=await fetch(url,{cache:"no-store"});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+  return data.signals||{};
+}
 async function fetchLatestQuotes(symbols){
   const url=state.apiUrl.replace(/\/$/,"")+"/api/quotes?symbols="+encodeURIComponent(symbols.join(","));
   const response=await fetch(url,{cache:"no-store"});
@@ -260,8 +275,9 @@ async function refreshLiveQuotes(){
   const symbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
   if(!symbols.length)return;
   try{
-    const data=await fetchLatestQuotes(symbols);
+    const [data,signals]=await Promise.all([fetchLatestQuotes(symbols),fetchSignals(symbols)]);
     for(const symbol of symbols){
+      if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
       const trade=data.trades?.[symbol];
       if(trade&&state.market[symbol])state.market[symbol].trade=trade;
     }
@@ -286,8 +302,9 @@ async function loadMarket(){
   try{
     if(!state.symbols.length){$("#cards").innerHTML='<article class="stock-card">ยังไม่มีหุ้นใน Watchlist ค้นหาและเพิ่มหุ้นได้ด้านบน</article>';return;}
     const displaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
-    const [dailyMarket,intradayMarket]=await Promise.all([fetchMarket(displaySymbols),fetchMarket(displaySymbols,"5Min")]);
+    const [dailyMarket,intradayMarket,signals]=await Promise.all([fetchMarket(displaySymbols,"1Day"),fetchMarket(displaySymbols,"5Min"),fetchSignals(displaySymbols)]);
     state.market=dailyMarket;
+    for(const symbol of displaySymbols)if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
     for(const symbol of displaySymbols)if(state.market[symbol])state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
     $("#cards").innerHTML=displaySymbols.map(s=>state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+s+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>').join("");
     state.symbols.forEach(s=>{if(state.market[s])maybeNotify(s,state.market[s]);});
@@ -337,8 +354,8 @@ async function runScreener(){
 }
 $("#apiUrl").value=state.apiUrl;
 $("#refresh").addEventListener("click",loadMarket);
-$("#timeframe").value=state.timeframe;
-$("#timeframe").addEventListener("change",e=>{state.timeframe=e.target.value;localStorage.setItem("stockWatcherTimeframe",state.timeframe);loadMarket();});
+$("#timeframe").value="1Day";
+$("#timeframe").disabled=true;
 $("#saveUrl").addEventListener("click",()=>{
   const value=$("#apiUrl").value.trim().replace(/\/$/,"");
   try{new URL(value);state.apiUrl=value;localStorage.setItem("stockWatcherApiUrl",value);setStatus("บันทึก Worker URL แล้ว",true);loadMarket();}
