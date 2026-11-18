@@ -386,6 +386,17 @@ async function fetchLatestQuotes(symbols){
   if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
   return data;
 }
+function marketSessionStatus(){
+ const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+ const v=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+ const mins=Number(v.hour)*60+Number(v.minute),weekday=v.weekday!=='Sat'&&v.weekday!=='Sun';
+ if(!weekday)return {label:'ตลาดสหรัฐฯ ปิด',kind:'closed',detail:'วันหยุดสุดสัปดาห์ · แสดงราคาล่าสุด'};
+ if(mins>=570&&mins<960)return {label:'ตลาดสหรัฐฯ เปิด',kind:'open',detail:'ซื้อขายปกติ · ราคาจาก Alpaca IEX'};
+ if(mins>=240&&mins<570)return {label:'Pre-market',kind:'pre',detail:'ก่อนตลาดเปิด · ข้อมูลอาจมีจำกัด'};
+ if(mins>=960&&mins<1200)return {label:'After-hours',kind:'post',detail:'นอกเวลาซื้อขายปกติ · ข้อมูลอาจมีจำกัด'};
+ return {label:'ตลาดสหรัฐฯ ปิด',kind:'closed',detail:'รอรอบซื้อขายถัดไป'};
+}
+function updateMarketStatus(){const el=$('#marketStatus');if(!el)return;const s=marketSessionStatus();el.className='market-status '+s.kind;el.innerHTML='<span class="market-status-dot"></span><b>'+s.label+'</b><small>'+s.detail+'</small>';}
 function isUsRegularSession(){
   const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());
   const v=Object.fromEntries(parts.map(p=>[p.type,p.value]));
@@ -538,6 +549,8 @@ renderIdeas();renderWatchlist();initializeAccount();
 
 /* Live price polling: Alpaca IEX latest trades every 15 seconds during US regular hours. */
 setInterval(refreshLiveQuotes,15000);
+setInterval(updateMarketStatus,30000);
+updateMarketStatus();
 setInterval(refreshIntradayBars,60000);
 setInterval(syncSharedWatchlist,10000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshLiveQuotes();});
