@@ -65,10 +65,9 @@ async function lineIdTokenProfile(idToken,env) {
 async function createOrUpdateUser(env,lineUserId,profile={}) {
   const id="line:"+lineUserId;
   const existing=await env.DB.prepare("SELECT id FROM users WHERE line_user_id=?").bind(lineUserId).first();
-  await env.DB.prepare(`INSERT INTO users(id,line_user_id,display_name,updated_at,last_seen_at)
-    VALUES(?,?,?,datetime('now'),datetime('now'))
-    ON CONFLICT(line_user_id) DO UPDATE SET display_name=COALESCE(excluded.display_name,users.display_name),
-    updated_at=datetime('now'),last_seen_at=datetime('now')`)
+  await env.DB.prepare(`INSERT INTO users(id,line_user_id,display_name)
+    VALUES(?,?,?)
+    ON CONFLICT(line_user_id) DO UPDATE SET display_name=COALESCE(excluded.display_name,users.display_name)`)
     .bind(id,lineUserId,profile.name||null).run();
   if(!existing) {
     for(const symbol of DEFAULT_SYMBOLS) await env.DB.prepare("INSERT OR IGNORE INTO watchlist(user_id,symbol) VALUES(?,?)").bind(id,symbol).run();
