@@ -224,7 +224,7 @@ async function fetchLatestTrades(env,symbols) {
 async function fetchMarket(env,symbols,timeframe="1Day") {
   if(!env.ALPACA_KEY||!env.ALPACA_SECRET)throw new Error("Worker secrets ALPACA_KEY / ALPACA_SECRET missing");
   const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};
-  const base="https://data.alpaca.markets/v2",end=new Date(),start=new Date(end.getTime()-(timeframe==="4Hour"?45:140)*86400000);
+  const base="https://data.alpaca.markets/v2",end=new Date(),lookbackDays=timeframe==="4Hour"?45:timeframe==="5Min"?3:140,start=new Date(end.getTime()-lookbackDays*86400000);
   const u=new URL(base+"/stocks/bars");
   u.searchParams.set("symbols",symbols.join(","));u.searchParams.set("timeframe",timeframe);
   u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());
@@ -385,7 +385,7 @@ async function apiHandler(request,env,url,headers) {
   }
   if(url.pathname==="/api/market"&&request.method==="GET") {
     const requested=(url.searchParams.get("symbols")||DEFAULT_SYMBOLS.join(",")).split(",").map(cleanSymbol).filter(validSymbol);
-    const symbols=[...new Set(requested)],tf=(url.searchParams.get("timeframe")||"1Day").toLowerCase()==="4hour"?"4Hour":"1Day";
+    const symbols=[...new Set(requested)],rawTf=(url.searchParams.get("timeframe")||"1Day").toLowerCase(),tf=rawTf==="4hour"?"4Hour":rawTf==="5min"?"5Min":"1Day";
     if(!symbols.length)return json({error:"No supported symbols requested"},400,headers);
     if(symbols.length>50)return json({error:"Maximum 50 symbols per request",max:50},400,headers);
     try{return json(await fetchMarket(env,symbols,tf),200,headers);}
