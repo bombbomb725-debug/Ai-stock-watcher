@@ -332,7 +332,7 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
       {type:"text",text:score,size:"sm",weight:"bold",color:"#FFFFFF",flex:4}
     ]},
     {type:"text",text:"EMA20/50 "+(Number.isFinite(detail.ema20)?detail.ema20.toFixed(2):"—")+" / "+(Number.isFinite(detail.ema50)?detail.ema50.toFixed(2):"—")+" · RSI14 "+(Number.isFinite(detail.rsi)?detail.rsi.toFixed(1):"—")+" · MACD "+(Number.isFinite(detail.macd)?detail.macd.toFixed(3):"—")+" · ADX14 "+(Number.isFinite(detail.adx)?detail.adx.toFixed(1):"—"),size:"xs",color:"#A9B8CC",wrap:true},
-    {type:"text",text:"กราฟราคา 5 นาที · อัปเดตสัญญาณ: "+checked+" · "+(thai?"Yahoo Finance (ไม่เป็นทางการ)":"Alpaca IEX"),size:"xs",color:"#8293A9",wrap:true}
+    {type:"text",text:"กราฟราคา 5 นาที · อัปเดตสัญญาณ: "+checked+" · "+(thai?"DataCedar (ราคาปิดย้อนหลัง)":"Alpaca IEX"),size:"xs",color:"#8293A9",wrap:true}
   );
   if(plan)contents.push(
     {type:"separator",margin:"md",color:"#314158"},
@@ -712,7 +712,7 @@ async function scanAlerts(env) {
     stateByKey.set(key,signal.status);
     if(Number(item.alerts_enabled)===0)continue;
     const currency=isThaiSymbol(item.symbol)?"฿":"$";
-    const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+oldStatus.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?currency+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล "+(isThaiSymbol(item.symbol)?"Yahoo Finance (ไม่เป็นทางการ)":"Alpaca IEX")+" · สแกน "+checked;
+    const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+oldStatus.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?currency+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล "+(isThaiSymbol(item.symbol)?"DataCedar (ราคาปิดรายวัน · อาจล่าช้า)":"Alpaca IEX")+" · สแกน "+checked;
     try {
       await linePush(env,item.line_user_id,message);
       await env.DB.prepare("INSERT INTO alert_events(user_id,symbol,status,old_status,new_status,message) VALUES(?,?,?,?,?,?)")
@@ -818,7 +818,7 @@ export default {
     if(url.pathname==="/line/webhook")return request.method==="POST"?handleLineWebhook(request,env):json({error:"Method not allowed"},405);
     if(request.method==="OPTIONS")return origin&&!ALLOWED_ORIGINS.has(origin)?json({error:"Origin not allowed"},403,headers):new Response(null,{status:204,headers});
     if(origin&&!ALLOWED_ORIGINS.has(origin))return json({error:"Origin not allowed",origin},403,headers);
-    if(url.pathname==="/"&&request.method==="GET")return json({service:"AI Stock Watcher API",status:"ready",multiUser:true,d1:dbReady(env),maxWatchlist:MAX_WATCHLIST,feed:"Alpaca IEX + Yahoo Finance (unofficial)",scheduledScan:"* * * * *"},200,headers);
+    if(url.pathname==="/"&&request.method==="GET")return json({service:"AI Stock Watcher API",status:"ready",multiUser:true,d1:dbReady(env),maxWatchlist:MAX_WATCHLIST,feed:"Alpaca IEX + DataCedar (Yahoo fallback)",scheduledScan:"* * * * *"},200,headers);
     if(request.method!=="GET"&&request.method!=="POST")return json({error:"Method not allowed"},405,headers);
     try{return await apiHandler(request,env,url,headers);}catch(e){console.error("API_ERROR",String(e));return json({error:"Internal API error",detail:String(e).slice(0,250)},500,headers);}
   },
