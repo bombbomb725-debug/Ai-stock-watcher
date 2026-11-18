@@ -589,6 +589,20 @@ async function fetchLatestTrades(env,symbols) {
   const data=await r.json();
   return data.trades||{};
 }
+// DataCedar enforces a strict one-request-per-second burst limit.
+let dataCedarQueue=Promise.resolve();
+let dataCedarLastRequestAt=0;
+const dataCedarInflight=new Map();
+async function dataCedarFetch(url,options) {
+  const task=dataCedarQueue.then(async()=>{
+    const wait=Math.max(0,1100-(Date.now()-dataCedarLastRequestAt));
+    if(wait) await new Promise(resolve=>setTimeout(resolve,wait));
+    dataCedarLastRequestAt=Date.now();
+    return fetch(url,options);
+  });
+  dataCedarQueue=task.then(()=>undefined,()=>undefined);
+  return task;
+}
 async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(!env.DATACEDAR_API_KEY)throw new Error("DATACEDAR_API_KEY is not configured");
   const tf=timeframe==="5Min"?"5Min":timeframe==="4Hour"?"1Hour":"1Day",ttl=timeframe==="5Min"?60:timeframe==="4Hour"?300:900;
@@ -597,7 +611,7 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(fresh)return await fresh.json();
   const sid="set:"+symbol.replace(/\.BK$/i,"").toUpperCase();
   const url="https://api.datacedar.com/v3/stocks/"+encodeURIComponent(sid)+"/bars?timeframe="+tf+"&adjustment=raw&order=asc&limit=500";
-  let r;try{r=await fetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(4500)});}catch(e){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar timeout/network: "+String(e)+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw e;}
+  let r;try{r=await dataCedarFetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(9000)});}catch(e){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar timeout/network: "+String(e)+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw e;}
   if(!r.ok){const detail=(await r.text()).slice(0,240),stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar API "+r.status+": "+detail+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw new Error("DataCedar API "+r.status+": "+detail);}
   const payload=await r.json();if(payload?.error)throw new Error(payload.error.message||"DataCedar API error");
   if(!Array.isArray(payload?.data))throw new Error("DataCedar response format invalid");
