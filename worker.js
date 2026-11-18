@@ -359,6 +359,33 @@ function rsi(values,p=14) {
   let ag=g/p,al=l/p;for(let i=p+1;i<values.length;i++){const d=values[i]-values[i-1];ag=(ag*(p-1)+Math.max(d,0))/p;al=(al*(p-1)+Math.max(-d,0))/p;}
   return al===0?100:100-100/(1+ag/al);
 }
+function adxValue(bars,period=14) {
+  if(!Array.isArray(bars)||bars.length<period*2+1)return null;
+  const tr=[],plusDM=[],minusDM=[];
+  for(let i=1;i<bars.length;i++){
+    const h=Number(bars[i].h),l=Number(bars[i].l),pc=Number(bars[i-1].c);
+    const ph=Number(bars[i-1].h),pl=Number(bars[i-1].l);
+    if(![h,l,pc,ph,pl].every(Number.isFinite))continue;
+    const up=h-ph,down=pl-l;
+    tr.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
+    plusDM.push(up>down&&up>0?up:0);
+    minusDM.push(down>up&&down>0?down:0);
+  }
+  if(tr.length<period*2)return null;
+  let smTR=tr.slice(0,period).reduce((a,b)=>a+b,0);
+  let smP=plusDM.slice(0,period).reduce((a,b)=>a+b,0);
+  let smM=minusDM.slice(0,period).reduce((a,b)=>a+b,0);
+  const dx=[];
+  for(let i=period-1;i<tr.length;i++){
+    if(i>=period){smTR=smTR-smTR/period+tr[i];smP=smP-smP/period+plusDM[i];smM=smM-smM/period+minusDM[i];}
+    const pdi=smTR?100*smP/smTR:0,mdi=smTR?100*smM/smTR:0;
+    dx.push(pdi+mdi?100*Math.abs(pdi-mdi)/(pdi+mdi):0);
+  }
+  if(dx.length<period)return null;
+  let value=dx.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<dx.length;i++)value=(value*(period-1)+dx[i])/period;
+  return value;
+}
 function analyzeStatus(bars,price) {
   // Keep this logic identical to app.js analyze(..., "1Day").
   const last=bars[bars.length-1];
@@ -369,28 +396,24 @@ function analyzeStatus(bars,price) {
   const short=ema(closes,20),long=ema(closes,50),momentum=rsi(closes),e20s=emaSeries(closes,20),e50s=emaSeries(closes,50);
   const e12=emaSeries(closes,12),e26=emaSeries(closes,26);
   const macdLine=closes.map((_,i)=>e12[i]!==null&&e26[i]!==null?e12[i]-e26[i]:null);
-  const validMacd=macdLine.filter(Number.isFinite);
-  const signalSeries=emaSeries(validMacd,9);
-  const macd=macdLine[macdLine.length-1],macdSignal=signalSeries[signalSeries.length-1],hist=macd-macdSignal;
-  const rising20=e20s.at(-1)>e20s.at(-6),rising50=e50s.at(-1)>e50s.at(-6);
-  const lastClose=closes.at(-1);
-  const trend=short>long&&rising20&&rising50&&lastClose>short;
-  const momentumOK=momentum>=50&&momentum<70&&macd>macdSignal&&hist>0;
-  const confirmed=Boolean(trend&&momentumOK);
-  const prior=done.slice(-21,-1);
-  const priorHigh=prior.length?Math.max(...prior.map(b=>Number(b.h)).filter(Number.isFinite)):null;
-  const lastVolume=Number(done.at(-1)?.v);
-  const avgVolumeRows=done.slice(-21,-1).map(b=>Number(b.v)).filter(Number.isFinite);
+  const validMacd=macdLine.filter(Number.isFinite),signalSeries=emaSeries(validMacd,9);
+  const macd=macdLine.at(-1),macdSignal=signalSeries.at(-1),hist=macd-macdSignal;
+  const adx=adxValue(done),rising20=e20s.at(-1)>e20s.at(-6),rising50=e50s.at(-1)>e50s.at(-6);
+  const lastClose=closes.at(-1),trend=short>long&&rising20&&rising50&&lastClose>short;
+  const rsiOK=momentum>=50&&momentum<70,macdOK=macd>macdSignal&&hist>0,trendStrengthOK=Number.isFinite(adx)&&adx>=18;
+  const confirmed=Boolean(trend&&rsiOK&&macdOK&&trendStrengthOK);
+  const prior=done.slice(-21,-1),priorHigh=prior.length?Math.max(...prior.map(b=>Number(b.h)).filter(Number.isFinite)):null;
+  const lastVolume=Number(done.at(-1)?.v),avgVolumeRows=prior.map(b=>Number(b.v)).filter(Number.isFinite);
   const volumeAvg=avgVolumeRows.length?avgVolumeRows.reduce((x,y)=>x+y,0)/avgVolumeRows.length:0;
-  const breakout=Number.isFinite(price)&&Number.isFinite(priorHigh)&&price>priorHigh;
+  const breakout=Number.isFinite(lastClose)&&Number.isFinite(priorHigh)&&lastClose>priorHigh;
   const volumeOK=volumeAvg>0&&lastVolume>=volumeAvg*1.3;
   const strong=confirmed&&breakout&&volumeOK;
-  const score=[trend,momentumOK,breakout,volumeOK,Boolean(hist>0)].filter(Boolean).length;
+  const score=[trend,rsiOK,macdOK,breakout,volumeOK].filter(Boolean).length;
   let status="wait",label="รอการยืนยันแนวโน้ม";
-  if(strong){status="buy";label="ขาขึ้นยืนยัน + เบรกเอาต์";}
-  else if(confirmed){status="buy";label="BUY SIGNAL · แนวโน้มขาขึ้น";}
-  else if(momentum<45||(!trend&&Number.isFinite(price)&&price<short&&short<long)){status="risk";label="แนวโน้มยังอ่อน";}
-  else if(Number.isFinite(price)&&price>short&&!trend){status="wait";label="เริ่มฟื้นตัว · รอยืนยัน";}
+  if(strong){status="buy";label="ขาขึ้นแข็งแรง + เบรกเอาต์และวอลุ่มยืนยัน";}
+  else if(confirmed){status="buy";label="BUY SIGNAL · แนวโน้มและ ADX ยืนยัน";}
+  else if(momentum<45||(!trend&&lastClose<short&&short<long)){status="risk";label="แนวโน้มยังอ่อน";}
+  else if(lastClose>short&&!trend){status="wait";label="เริ่มฟื้นตัว · รอยืนยัน";}
   return {status,label,score};
 }
 async function scanAlerts(env) {
