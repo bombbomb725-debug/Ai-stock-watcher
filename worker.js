@@ -86,20 +86,19 @@ async function lineIdTokenProfile(idToken,env) {
   return data;
 }
 async function createOrUpdateUser(env,lineUserId,profile={}) {
-  // Legacy D1 databases use an INTEGER AUTOINCREMENT users.id.
-  // Let SQLite allocate the primary key instead of forcing a text ID.
-  let user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
+  // Existing LINE users need only one lookup; do not issue a no-op UPDATE + SELECT.
+  const user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
   if(user) {
-    await env.DB.prepare("UPDATE users SET display_name=COALESCE(?,display_name) WHERE line_user_id=?")
-      .bind(profile.name||null,lineUserId).run();
-    user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
+    if(profile.name && profile.name!==user.display_name) {
+      await env.DB.prepare("UPDATE users SET display_name=? WHERE line_user_id=?").bind(profile.name,lineUserId).run();
+      user.display_name=profile.name;
+    }
     return user;
   }
-  await env.DB.prepare("INSERT INTO users(line_user_id,display_name) VALUES(?,?)")
-    .bind(lineUserId,profile.name||null).run();
-  user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
-  if(!user)throw new Error("สร้างข้อมูลผู้ใช้ใน D1 ไม่สำเร็จ");
-  return user;
+  await env.DB.prepare("INSERT INTO users(line_user_id,display_name) VALUES(?,?)").bind(lineUserId,profile.name||null).run();
+  const created=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
+  if(!created)throw new Error("สร้างข้อมูลผู้ใช้ใน D1 ไม่สำเร็จ");
+  return created;
 }
 async function normalizeSymbols(env,symbols) {
   const input=[...new Set((symbols||[]).map(cleanSymbol))];
@@ -395,19 +394,23 @@ async function handleLineWebhook(request,env) {
   const raw=await request.arrayBuffer();
   if(!await verifyLineSignature(raw,request.headers.get("x-line-signature")||"",env.LINE_CHANNEL_SECRET))return json({error:"Invalid LINE signature"},401);
   let payload; try{payload=JSON.parse(new TextDecoder().decode(raw));}catch{return json({error:"Invalid JSON"},400);}
-  let activeRichMenuId=null; try { activeRichMenuId=await ensureRichMenu(env); } catch(e) { console.error("LINE_RICH_MENU_SETUP_FAILED",String(e)); }
   for(const event of payload.events||[]) {
     const lineUserId=event.source?.userId;
     if(!lineUserId)continue;
     if(event.type==="unfollow")continue;
-    if(activeRichMenuId) { try { const mr=await fetch("https://api.line.me/v2/bot/user/"+lineUserId+"/richmenu/"+activeRichMenuId,{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN}}); if(!mr.ok)console.error("LINE_USER_RICH_MENU_LINK_FAILED",mr.status,(await mr.text()).slice(0,200)); } catch(e) { console.error("LINE_USER_RICH_MENU_LINK_ERROR",String(e)); } }
+    if(event.type==="follow") {
+      try {
+        const activeRichMenuId=await ensureRichMenu(env);
+        const mr=await fetch("https://api.line.me/v2/bot/user/"+lineUserId+"/richmenu/"+activeRichMenuId,{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN}});
+        if(!mr.ok)console.error("LINE_USER_RICH_MENU_LINK_FAILED",mr.status,(await mr.text()).slice(0,200));
+      } catch(e) { console.error("LINE_RICH_MENU_SETUP_FAILED",String(e)); }
+    }
     const user=await createOrUpdateUser(env,lineUserId,{});
     if(event.type==="follow") {
       await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\nสูงสุด 50 หุ้นต่อคน\n\nเชื่อมเว็บ: เปิดเว็บไซต์ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ในแชตนี้");
       continue;
     }
     if(event.type!=="message"||event.message?.type!=="text")continue;
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_input_modes (user_id INTEGER PRIMARY KEY, mode TEXT NOT NULL, expires_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
     const inputMode=await env.DB.prepare("SELECT mode FROM user_input_modes WHERE user_id=? AND expires_at>?").bind(user.id,Math.floor(Date.now()/1000)).first();
     const cmd=parseLineCommand(event.message.text);
     if(inputMode && !["link","add_prompt","remove_menu","settings","alert_on","alert_off","list","ideas","test"].includes(cmd.action)) {
