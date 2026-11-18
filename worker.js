@@ -190,7 +190,7 @@ async function handleLineWebhook(request,env) {
       const codeHash=await sha256Hex(cmd.code),now=Math.floor(Date.now()/1000);
       const pending=await env.DB.prepare("SELECT code_hash FROM web_link_sessions WHERE code_hash=? AND user_id IS NULL AND code_expires_at>?").bind(codeHash,now).first();
       if(!pending) {
-        await lineReply(env,event.replyToken,"這組連接碼無效或已過期。請回到網站重新產生連接碼，再輸入「เชื่อม รหัส」");
+        await lineReply(env,event.replyToken,"รหัสเชื่อมเว็บไม่ถูกต้องหรือหมดอายุ กลับไปที่เว็บไซต์เพื่อสร้างรหัสใหม่ แล้วพิมพ์ “เชื่อม รหัส” ในแชตนี้");
       } else {
         const linked=await env.DB.prepare("UPDATE web_link_sessions SET user_id=? WHERE code_hash=? AND user_id IS NULL AND code_expires_at>?").bind(user.id,codeHash,now).run();
         if((linked.meta?.changes||0)>0)await lineReply(env,event.replyToken,"เชื่อมบัญชีสำเร็จแล้ว! เว็บนี้ใช้ Watchlist เดียวกับ LINE ของคุณได้แล้ว");
@@ -232,7 +232,7 @@ async function handleLineWebhook(request,env) {
       const lines=(rows.results||[]).map((x,i)=>(i+1)+". "+x.symbol+" · "+x.score+"/5 · "+x.status+" — "+(x.rationale||"คะแนนทางเทคนิค")).join("\n");
       await lineReply(env,event.replyToken,"หุ้นที่ Screener จัดอันดับ (ไม่ใช่คำแนะนำการลงทุน)\n"+(lines||"ยังไม่มีผลคัดกรอง รอรอบสแกน"));
     } else {
-      await lineReply(env,event.replyToken,"คำสั่ง AI Stock Watcher\n• เพิ่ม NVDA\n• ลบ NVDA\n• รายการหุ้น\n• หุ้นแนะนำ\nสูงสุด 50 หุ้นต่อคน");
+      await lineReply(env,event.replyToken,"คำสั่ง AI Stock Watcher\n• เพิ่ม NVDA\n• ลบ NVDA\n• รายการหุ้น\n• หุ้นแนะนำ\n• เชื่อม รหัส (เชื่อมเว็บกับ LINE)\nสูงสุด 50 หุ้นต่อคน");
     }
   }
   return json({ok:true});
