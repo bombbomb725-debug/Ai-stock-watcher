@@ -409,14 +409,18 @@ async function handleLineWebhook(request,env) {
         if(!mr.ok)console.error("LINE_USER_RICH_MENU_LINK_FAILED",mr.status,(await mr.text()).slice(0,200));
       } catch(e) { console.error("LINE_RICH_MENU_SETUP_FAILED",String(e)); }
     }
+    const isTextMessage=event.type==="message"&&event.message?.type==="text";
+    const cmd=isTextMessage?parseLineCommand(event.message.text):null;
+    if(cmd?.action==="list") {
+      await lineReply(env,event.replyToken,"รับคำสั่งแล้ว กำลังโหลดรายการหุ้นของคุณ…");
+    }
     const user=await createOrUpdateUser(env,lineUserId,{});
     if(event.type==="follow") {
       await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\nสูงสุด 50 หุ้นต่อคน\n\nเชื่อมเว็บ: เปิดเว็บไซต์ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ในแชตนี้");
       continue;
     }
-    if(event.type!=="message"||event.message?.type!=="text")continue;
+    if(!isTextMessage)continue;
     const inputMode=await env.DB.prepare("SELECT mode FROM user_input_modes WHERE user_id=? AND expires_at>?").bind(user.id,Math.floor(Date.now()/1000)).first();
-    const cmd=parseLineCommand(event.message.text);
     if(inputMode && !["link","add_prompt","remove_menu","settings","alert_on","alert_off","list","ideas","test"].includes(cmd.action)) {
       const symbols=parseSymbols(event.message.text);
       if(symbols)cmd.action=inputMode.mode==="add"?"add":"remove",cmd.symbols=symbols;
@@ -475,10 +479,9 @@ async function handleLineWebhook(request,env) {
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length) {
-        await lineReply(env,event.replyToken,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
+        await linePush(env,lineUserId,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
         continue;
       }
-      await lineReply(env,event.replyToken,"กำลังโหลดข้อมูลหุ้น "+symbols.length+" ตัว… เดี๋ยวส่งรายการให้ในแชตนี้");
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
       const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
       try {
