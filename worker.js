@@ -591,7 +591,7 @@ async function fetchLatestTrades(env,symbols) {
 }
 async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(!env.DATACEDAR_API_KEY)throw new Error("DATACEDAR_API_KEY is not configured");
-  const tf=timeframe==="5Min"?"5m":timeframe==="4Hour"?"1h":"1d",ttl=timeframe==="5Min"?60:timeframe==="4Hour"?300:900;
+  const tf=timeframe==="5Min"?"5Min":timeframe==="4Hour"?"1Hour":"1Day",ttl=timeframe==="5Min"?60:timeframe==="4Hour"?300:900;
   const cache=caches.default,cacheId="https://ai-stock-watcher-cache.invalid/datacedar/"+encodeURIComponent(symbol)+"/"+timeframe;
   const freshKey=new Request(cacheId+"/fresh"),staleKey=new Request(cacheId+"/stale"),fresh=await cache.match(freshKey);
   if(fresh)return await fresh.json();
@@ -618,7 +618,7 @@ async function fetchYahooThaiLegacy(symbol,timeframe="1Day") {
   const freshKey=new Request(cacheId+"/fresh"),staleKey=new Request(cacheId+"/stale"),fresh=await cache.match(freshKey);
   if(fresh)return await fresh.json();
   let payload=null,lastError=null;
-  for(const host of ["query1.finance.yahoo.com"])try{
+  for(const host of ["query1.finance.yahoo.com","query2.finance.yahoo.com"])try{
     const url="https://"+host+"/v8/finance/chart/"+encodeURIComponent(symbol)+"?range="+range+"&interval="+interval+"&events=div%2Csplits";
     const r=await fetch(url,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0 (compatible; AIStockWatcher/1.0)"},cf:{cacheTtl:ttl,cacheEverything:true},signal:AbortSignal.timeout(3500)});
     if(!r.ok)throw new Error("Yahoo HTTP "+r.status);
