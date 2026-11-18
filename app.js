@@ -461,7 +461,7 @@ async function loadMarket(){
     const count=Object.values(state.market).reduce((n,x)=>n+(x.bars||[]).length,0);
     const chartFallback=intradayResult.status!=="fulfilled";
     const signalFallback=signalResult.status!=="fulfilled";
-    setStatus("เชื่อมต่อแล้ว · Alpaca IEX (สหรัฐฯ) + Yahoo Finance (หุ้นไทย)"+(chartFallback?" · ใช้กราฟรายวันสำรอง":"")+(signalFallback?" · คำนวณสถานะจากข้อมูลราคา":""),true);
+    setStatus("เชื่อมต่อแล้ว · Alpaca IEX (สหรัฐฯ) + DataCedar (หุ้นไทย)"+(chartFallback?" · ใช้กราฟรายวันสำรอง":"")+(signalFallback?" · คำนวณสถานะจากข้อมูลราคา":""),true);
     $("#updated").textContent="อัปเดต "+new Date().toLocaleString("th-TH")+" · ข้อมูลย้อนหลัง "+count+" แท่ง";
   }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#usCards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลหุ้นสหรัฐฯ ไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p></article>';$("#thaiCards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลหุ้นไทยไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p></article>';}
   finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
