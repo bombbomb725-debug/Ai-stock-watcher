@@ -499,20 +499,30 @@ async function searchAssets(){
     root.innerHTML=state.assets.length?state.assets.map(a=>'<button class="search-result" type="button" data-symbol="'+escapeHtml(a.symbol.replace(/\.BK$/,""))+(a.market==="THAI"?".BK":'')+'"><b>'+escapeHtml(a.symbol.replace(/\.BK$/i,""))+'</b><span>'+escapeHtml(a.name)+'</span><small>'+(a.market==="THAI"?"หุ้นไทย · "+escapeHtml(a.exchange):"หุ้นสหรัฐฯ · "+escapeHtml(a.exchange))+' · เพิ่ม +</small></button>').join(""):"ไม่พบหุ้นที่ตรงกัน";
   }catch(e){root.textContent="ค้นหาไม่สำเร็จ: "+e.message;}
 }
+let screenerRanked=[],screenerPage=1;
+function renderScreenerPage(){
+  const root=$("#screenerResults"),pageSize=10,total=screenerRanked.length,pages=Math.max(1,Math.ceil(total/pageSize));
+  screenerPage=Math.min(Math.max(1,screenerPage),pages);
+  const shown=screenerRanked.slice((screenerPage-1)*pageSize,screenerPage*pageSize);
+  const header='<div class="screener-summary">พบ '+total+' หุ้น · แสดงอันดับ '+((screenerPage-1)*pageSize+1)+'–'+Math.min(screenerPage*pageSize,total)+' จาก '+total+' หุ้น · สแกนได้ '+(window.screenerScannedCount||0)+' หุ้น</div>';
+  const rows=shown.map((x,i)=>{
+    const already=state.symbols.includes(x.symbol);
+    const label=x.status==="buy"?"แนวโน้มผ่านเงื่อนไข":x.status==="risk"?"แนวโน้มอ่อน":"รอการยืนยัน";
+    return '<div class="rank-row"><b>#'+((screenerPage-1)*pageSize+i+1)+' '+escapeHtml(x.symbol)+'</b><span class="signal '+(x.status==="buy"?"buy":x.status==="risk"?"risk":"wait")+'">'+label+'</span><span>'+Number(x.score||0)+'/5</span><button type="button" data-screener-add="'+escapeHtml(x.symbol)+'" '+(already?'disabled':'')+'>'+(already?'อยู่ในรายการแล้ว':'เพิ่มใน LINE + เว็บ')+'</button></div>';
+  }).join("");
+  const pager=pages>1?'<div class="screener-pager"><button type="button" data-screener-page="'+(screenerPage-1)+'" '+(screenerPage===1?'disabled':'')+'>หน้าก่อน</button><span>หน้า '+screenerPage+' / '+pages+'</span><button type="button" data-screener-page="'+(screenerPage+1)+'" '+(screenerPage===pages?'disabled':'')+'>หน้าถัดไป</button></div>':"";
+  root.innerHTML=header+(rows||'<div class="screener-empty">ไม่พบหุ้นที่มีข้อมูลย้อนหลังเพียงพอ</div>')+pager;
+}
 async function runScreener(){
   const btn=$("#runScreener"),root=$("#screenerResults");
   btn.disabled=true;btn.textContent="กำลังคัดกรอง…";
-  root.textContent="กำลังค้นหาหุ้นสหรัฐฯ ทุกอุตสาหกรรมจากหุ้นที่มีการซื้อขายคึกคักและหุ้นที่เป็น Market Movers แล้วคำนวณ EMA20/50, RSI14, MACD และวอลุ่ม…";
+  root.textContent="กำลังคัดกรองหุ้นสหรัฐฯ และคำนวณ EMA20/50, RSI14, MACD และ ADX14…";
   try{
     const data=await apiRequest("/api/screener");
-    const ranked=data.ideas||[];
-    const header='<div class="screener-summary">ตรวจพบ '+Number(data.candidateCount||0)+' หุ้น · มีข้อมูลย้อนหลังเพียงพอ '+Number(data.scannedCount||0)+' หุ้น · แสดงอันดับสูงสุด '+ranked.length+' หุ้น</div>';
-    const rows=ranked.map((x,i)=>{
-      const already=state.symbols.includes(x.symbol);
-      const label=x.status==="buy"?"แนวโน้มผ่านเงื่อนไข":x.status==="risk"?"แนวโน้มอ่อน":"รอการยืนยัน";
-      return '<div class="rank-row"><b>#'+(i+1)+' '+escapeHtml(x.symbol)+'</b><span class="signal '+(x.status==="buy"?"buy":x.status==="risk"?"risk":"wait")+'">'+label+'</span><span>'+Number(x.score||0)+'/5</span><button type="button" data-screener-add="'+escapeHtml(x.symbol)+'" '+(already?'disabled':'')+'>'+(already?'อยู่ในรายการแล้ว':'เพิ่มใน LINE + เว็บ')+'</button></div>';
-    }).join("");
-    root.innerHTML=header+(rows||'<div class="screener-empty">ยังไม่มีหุ้นที่มีข้อมูลย้อนหลังเพียงพอ ลองคัดกรองอีกครั้งในช่วงตลาดเปิด</div>');
+    screenerRanked=data.ideas||[];
+    screenerPage=1;
+    window.screenerScannedCount=Number(data.scannedCount||0);
+    renderScreenerPage();
   }catch(e){root.textContent="คัดกรองไม่สำเร็จ: "+e.message;}
   finally{btn.disabled=false;btn.textContent="คัดกรองอีกครั้ง";}
 }
@@ -534,7 +544,7 @@ $("#usCards").addEventListener("click",e=>{
 });
 $("#thaiCards").addEventListener("click",e=>{const b=e.target.closest("[data-remove]");if(b)removeSymbol(b.dataset.remove);});
 $("#runScreener").addEventListener("click",runScreener);
-$("#screenerResults").addEventListener("click",e=>{const b=e.target.closest("[data-screener-add]");if(b)addSymbol(b.dataset.screenerAdd);});
+$("#screenerResults").addEventListener("click",e=>{const add=e.target.closest("[data-screener-add]");if(add){addSymbol(add.dataset.screenerAdd);return;}const page=e.target.closest("[data-screener-page]");if(page){screenerPage=Number(page.dataset.screenerPage);renderScreenerPage();}});
 $("#enableAlerts").addEventListener("click",async()=>{
   if(!("Notification" in window)){setStatus("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");return;}
   const permission=await Notification.requestPermission();
