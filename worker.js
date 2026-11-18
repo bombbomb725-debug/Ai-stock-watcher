@@ -101,9 +101,25 @@ async function createOrUpdateUser(env,lineUserId,profile={}) {
   if(!user)throw new Error("สร้างข้อมูลผู้ใช้ใน D1 ไม่สำเร็จ");
   return user;
 }
+async function normalizeSymbols(env,symbols) {
+  const input=[...new Set((symbols||[]).map(cleanSymbol))];
+  const bare=input.filter(s=>/^[A-Z0-9]{1,8}$/.test(s));
+  if(!bare.length)return input;
+  try {
+    const directory=await getThaiSecurities();
+    const thai=new Set(directory.map(x=>String(x.symbol||"").toUpperCase()));
+    return input.map(s=>thai.has(s)?s+".BK":s);
+  } catch(e) {
+    console.warn("THAI_SYMBOL_RESOLUTION_UNAVAILABLE",String(e));
+    return input;
+  }
+}
+async function normalizeSymbol(env,symbol) {
+  return (await normalizeSymbols(env,[symbol]))[0]||cleanSymbol(symbol);
+}
 async function getWatchlist(env,userId) {
   const r=await env.DB.prepare("SELECT symbol,COALESCE(added_at,created_at) AS added_at FROM watchlist WHERE user_id=? ORDER BY COALESCE(added_at,created_at),symbol").bind(userId).all();
-  return (r.results||[]).map(x=>x.symbol);
+  return await normalizeSymbols(env,(r.results||[]).map(x=>x.symbol));
 }
 async function addWatch(env,userId,symbol) {
   const exists=await env.DB.prepare("SELECT 1 AS yes FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,symbol).first();
@@ -745,7 +761,7 @@ async function apiHandler(request,env,url,headers) {
   }
   if(url.pathname==="/api/market"&&request.method==="GET") {
     const requested=(url.searchParams.get("symbols")||DEFAULT_SYMBOLS.join(",")).split(",").map(cleanSymbol).filter(validSymbol);
-    const symbols=[...new Set(requested)],rawTf=(url.searchParams.get("timeframe")||"1Day").toLowerCase(),tf=rawTf==="4hour"?"4Hour":rawTf==="5min"?"5Min":"1Day";
+    const symbols=[...new Set(await normalizeSymbols(env,requested))],rawTf=(url.searchParams.get("timeframe")||"1Day").toLowerCase(),tf=rawTf==="4hour"?"4Hour":rawTf==="5min"?"5Min":"1Day";
     if(!symbols.length)return json({error:"No supported symbols requested"},400,headers);
     if(symbols.length>50)return json({error:"Maximum 50 symbols per request",max:50},400,headers);
     try{return json(await fetchMarket(env,symbols,tf),200,headers);}
