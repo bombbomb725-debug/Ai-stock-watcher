@@ -622,7 +622,7 @@ async function scanAlerts(env) {
   const stateByKey=new Map((stateRows.results||[]).map(x=>[x.user_id+"|"+x.symbol,x.status]));
   for(const item of watch) {
     const data=market[item.symbol];
-    if(!data)continue;
+    if(!data||data.error||(data.bars||[]).length<55)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p),isThaiSymbol(item.symbol)?"Asia/Bangkok":"America/New_York");
     const price=Number(data.trade?.p);
     const key=item.user_id+"|"+item.symbol;
