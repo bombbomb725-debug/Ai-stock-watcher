@@ -298,22 +298,37 @@ function rsi(values,p=14) {
   return al===0?100:100-100/(1+ag/al);
 }
 function analyzeStatus(bars,price) {
-  const lastBar=bars.at(-1);
+  // Keep this logic identical to app.js analyze(..., "1Day").
+  const last=bars[bars.length-1];
   const nyDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
-  const done=lastBar?.t&&nyDate(new Date(lastBar.t))===nyDate(new Date())?bars.slice(0,-1):bars;
+  const done=last?.t&&nyDate(new Date(last.t))===nyDate(new Date())?bars.slice(0,-1):bars;
   const closes=done.map(b=>Number(b.c)).filter(Number.isFinite);
   if(closes.length<55)return {status:"wait",label:"ข้อมูลย้อนหลังไม่พอ",score:0};
-  const e20=ema(closes,20),e50=ema(closes,50),r=rsi(closes),s20=emaSeries(closes,20),s50=emaSeries(closes,50);
-  const rising=s20.at(-1)>s20.at(-6)&&s50.at(-1)>s50.at(-6),trend=e20>e50&&rising&&closes.at(-1)>e20;
-  const m12=emaSeries(closes,12),m26=emaSeries(closes,26),macd=closes.map((_,i)=>m12[i]!=null&&m26[i]!=null?m12[i]-m26[i]:null).filter(Number.isFinite);
-  const sig=ema(macd,9),momentum=r>=50&&r<70&&macd.at(-1)>sig;
-  const prior=done.slice(-21,-1),priorHigh=prior.length?Math.max(...prior.map(x=>Number(x.h))):null;
+  const short=ema(closes,20),long=ema(closes,50),momentum=rsi(closes),e20s=emaSeries(closes,20),e50s=emaSeries(closes,50);
+  const e12=emaSeries(closes,12),e26=emaSeries(closes,26);
+  const macdLine=closes.map((_,i)=>e12[i]!==null&&e26[i]!==null?e12[i]-e26[i]:null);
+  const validMacd=macdLine.filter(Number.isFinite);
+  const signalSeries=emaSeries(validMacd,9);
+  const macd=macdLine[macdLine.length-1],macdSignal=signalSeries[signalSeries.length-1],hist=macd-macdSignal;
+  const rising20=e20s.at(-1)>e20s.at(-6),rising50=e50s.at(-1)>e50s.at(-6);
+  const lastClose=closes.at(-1);
+  const trend=short>long&&rising20&&rising50&&lastClose>short;
+  const momentumOK=momentum>=50&&momentum<70&&macd>macdSignal&&hist>0;
+  const confirmed=Boolean(trend&&momentumOK);
+  const prior=done.slice(-21,-1);
+  const priorHigh=prior.length?Math.max(...prior.map(b=>Number(b.h)).filter(Number.isFinite)):null;
+  const lastVolume=Number(done.at(-1)?.v);
+  const avgVolumeRows=done.slice(-21,-1).map(b=>Number(b.v)).filter(Number.isFinite);
+  const volumeAvg=avgVolumeRows.length?avgVolumeRows.reduce((x,y)=>x+y,0)/avgVolumeRows.length:0;
   const breakout=Number.isFinite(price)&&Number.isFinite(priorHigh)&&price>priorHigh;
-  const vols=done.slice(-21,-1).map(x=>Number(x.v)).filter(Number.isFinite),avg=vols.length?vols.reduce((a,b)=>a+b,0)/vols.length:0;
-  const vol=avg>0&&Number(done.at(-1)?.v)>=avg*1.3,confirmed=trend&&momentum,strong=confirmed&&breakout&&vol;
-  const score=[trend,momentum,breakout,vol,macd.at(-1)>sig].filter(Boolean).length;
-  const status=strong?"buy":confirmed?"buy":r<45||(!trend&&Number.isFinite(price)&&price<e20&&e20<e50)?"risk":"wait";
-  const label=strong?"ขาขึ้นยืนยัน + เบรกเอาต์":confirmed?"BUY SIGNAL · แนวโน้มขาขึ้น":status==="risk"?"แนวโน้มยังอ่อน":Number.isFinite(price)&&price>e20&&!trend?"เริ่มฟื้นตัว · รอยืนยัน":"รอการยืนยันแนวโน้ม";
+  const volumeOK=volumeAvg>0&&lastVolume>=volumeAvg*1.3;
+  const strong=confirmed&&breakout&&volumeOK;
+  const score=[trend,momentumOK,breakout,volumeOK,Boolean(hist>0)].filter(Boolean).length;
+  let status="wait",label="รอการยืนยันแนวโน้ม";
+  if(strong){status="buy";label="ขาขึ้นยืนยัน + เบรกเอาต์";}
+  else if(confirmed){status="buy";label="BUY SIGNAL · แนวโน้มขาขึ้น";}
+  else if(momentum<45||(!trend&&Number.isFinite(price)&&price<short&&short<long)){status="risk";label="แนวโน้มยังอ่อน";}
+  else if(Number.isFinite(price)&&price>short&&!trend){status="wait";label="เริ่มฟื้นตัว · รอยืนยัน";}
   return {status,label,score};
 }
 async function scanAlerts(env) {
