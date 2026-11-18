@@ -365,6 +365,10 @@ async function linePush(env,userId,text) {
   const r=await fetch("https://api.line.me/v2/bot/message/push",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({to:userId,messages:[{type:"text",text:String(text).slice(0,4900)}]})});
   if(!r.ok)throw new Error("LINE push failed "+r.status+" "+(await r.text()).slice(0,200));
 }
+async function linePushMessages(env,userId,messages) {
+  const r=await fetch("https://api.line.me/v2/bot/message/push",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({to:userId,messages})});
+  if(!r.ok)throw new Error("LINE push failed "+r.status+" "+(await r.text()).slice(0,250));
+}
 function parseSymbols(value) {
   const raw=String(value||"").trim().split(/[\s,，;；]+/).filter(Boolean).map(cleanSymbol);
   if(!raw.length||raw.some(x=>!validSymbol(x)))return null;
@@ -474,6 +478,7 @@ async function handleLineWebhook(request,env) {
         await lineReply(env,event.replyToken,"Watchlist ของคุณยังไม่มีหุ้น\\nพิมพ์ “เพิ่ม NVDA” เพื่อเริ่มติดตาม");
         continue;
       }
+      await lineReply(env,event.replyToken,"กำลังโหลดข้อมูลหุ้น "+symbols.length+" ตัว… เดี๋ยวส่งรายการให้ในแชตนี้");
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
       const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
       try {
@@ -484,11 +489,13 @@ async function handleLineWebhook(request,env) {
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
         const bubbles=pageSymbols.map(symbol=>{const daily=market.stocks?.[symbol];return stockFlexBubble(symbol,daily?.trade,bySymbol.get(symbol),dashboard,daily?.bars||[],daily?.bars||[]);});
-        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
-        if(pageCount>1)await lineReply(env,event.replyToken,"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”");
+        const messages=[{type:"flex",altText:"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount,contents:{type:"carousel",contents:bubbles}}];
+        if(pageCount>1)messages.push({type:"text",text:"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”"});
+        await linePushMessages(env,lineUserId,messages);
       } catch(e) {
         console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
-        await lineReply(env,event.replyToken,"แสดงการ์ดหุ้นไม่สำเร็จ: "+String(e).slice(0,180));
+        try{await linePush(env,lineUserId,"โหลดข้อมูลหุ้นไม่สำเร็จ: "+String(e).slice(0,220)+"\\nกรุณาลองใหม่อีกครั้ง");}
+        catch(pushError){console.error("LINE_WATCHLIST_PUSH_ERROR",String(pushError));}
       }
     } else if(cmd.action==="test") {
       try {
@@ -568,7 +575,8 @@ async function fetchMarket(env,symbols,timeframe="1Day") {
     const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET},base="https://data.alpaca.markets/v2",end=new Date(),days=timeframe==="4Hour"?45:timeframe==="5Min"?3:140,start=new Date(end.getTime()-days*86400000);
     const u=new URL(base+"/stocks/bars");u.searchParams.set("symbols",us.join(","));u.searchParams.set("timeframe",timeframe);u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());u.searchParams.set("limit","10000");u.searchParams.set("feed","iex");u.searchParams.set("sort","asc");u.searchParams.set("adjustment","raw");
     const tu=new URL(base+"/stocks/trades/latest");tu.searchParams.set("symbols",us.join(","));tu.searchParams.set("feed","iex");
-    const [barResult,tradeResult]=await Promise.allSettled([fetch(u,{headers:auth}),fetch(tu,{headers:auth})]);
+    const timeout=AbortSignal.timeout(12000);
+    const [barResult,tradeResult]=await Promise.allSettled([fetch(u,{headers:auth,signal:timeout}),fetch(tu,{headers:auth,signal:timeout})]);
     if(barResult.status!=="fulfilled")throw new Error("Alpaca bars request failed: "+String(barResult.reason||"network error"));
     const br=barResult.value;
     if(!br.ok)throw new Error("Alpaca bars "+br.status+": "+(await br.text()).slice(0,250));
