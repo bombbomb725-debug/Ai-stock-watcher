@@ -379,7 +379,7 @@ async function refreshIntradayBars(){
       state.market[symbol].intradayBars=data[symbol].bars||state.market[symbol].intradayBars||[];
       if(data[symbol].trade)state.market[symbol].trade=data[symbol].trade;
     }
-    $("#cards").innerHTML=symbols.map(s=>state.market[s]?renderCard(s,state.market[s]):"").join("");
+    $("#cards").innerHTML=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])].map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):"")).join("");
     $("#updated").textContent="อัปเดตกราฟระหว่างวัน "+new Date().toLocaleTimeString("th-TH")+" · แท่ง 5 นาที";
   }catch(e){console.warn("INTRADAY_BAR_REFRESH_FAILED",e);}
   finally{state.intradayBusy=false;}
@@ -456,7 +456,10 @@ async function searchAssets(){
     const response=await fetch(state.apiUrl.replace(/\/$/,"")+"/api/assets?q="+encodeURIComponent(q),{cache:"no-store"});
     const data=await response.json();if(!response.ok)throw new Error(data.error||"ค้นหาไม่สำเร็จ");
     state.assets=data.assets||[];
-    root.innerHTML=state.assets.length?state.assets.map(a=>'<button class="search-result" type="button" data-symbol="'+escapeHtml(a.symbol)+'"><b>'+escapeHtml(a.symbol)+'</b><span>'+escapeHtml(a.name)+'</span><small>เพิ่ม +</small></button>').join(""):"ไม่พบหุ้นที่ตรงกัน";
+    root.innerHTML=state.assets.length?state.assets.map(a=>{
+      const thai=a.market==="THAI",ticker=String(a.symbol).replace(/\.BK$/i,"");
+      return '<button class="search-result" type="button" data-symbol="'+escapeHtml(a.symbol)+'"><b>'+escapeHtml(ticker)+'</b><span>'+escapeHtml(a.name)+'</span><small>'+(thai?"หุ้นไทย · SET/mai · ":"หุ้นสหรัฐฯ · ")+'เพิ่ม +</small></button>';
+    }).join(""):"ไม่พบหุ้นที่ตรงกัน";
   }catch(e){root.textContent="ค้นหาไม่สำเร็จ: "+e.message;}
 }
 async function runScreener(){
