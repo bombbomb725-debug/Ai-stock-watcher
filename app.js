@@ -187,10 +187,17 @@ async function activateSharedAccount(data) {
   state.user=data.user||null;
   state.shared=true;
   state.symbols=data.symbols||[];
+  let mergeLimitReached=false;
   for(const symbol of localSymbols) {
     if(state.symbols.includes(symbol))continue;
-    const added=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
-    if(added.ok)state.symbols=added.symbols;
+    if(state.symbols.length>=50){mergeLimitReached=true;break;}
+    try {
+      const added=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
+      if(added.ok)state.symbols=added.symbols;
+    } catch(e) {
+      if(e.message.includes("50")){mergeLimitReached=true;break;}
+      throw e;
+    }
   }
   const current=await apiRequest("/api/me");
   state.symbols=current.symbols||state.symbols;
@@ -199,7 +206,7 @@ async function activateSharedAccount(data) {
   sessionStorage.removeItem("stockWatcherLinkCode");
   sessionStorage.removeItem("stockWatcherLinkExpiry");
   renderWatchlist();
-  $("#accountStatus").textContent="เชื่อม LINE แล้ว"+(state.user?.displayName?" · "+state.user.displayName:"")+" · ใช้ Watchlist ร่วมกัน";
+  $("#accountStatus").textContent="เชื่อม LINE แล้ว"+(state.user?.displayName?" · "+state.user.displayName:"")+" · ใช้ Watchlist ร่วมกัน"+(mergeLimitReached?" · รายการเต็ม 50 หุ้น จึงยังรวมบางตัวจากเว็บไม่ได้":"");
   setStatus("บัญชี LINE เชื่อมแล้ว",true);
   loadMarket();
 }
