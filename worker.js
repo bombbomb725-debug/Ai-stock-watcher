@@ -524,8 +524,11 @@ async function fetchYahooThai(symbol,timeframe="1Day") {
   const result=payload.chart?.result?.[0];if(!result)throw new Error("Yahoo returned no price history for "+symbol);
   const q=result.indicators?.quote?.[0]||{},ts=result.timestamp||[],bars=[];
   for(let i=0;i<ts.length;i++){const o=q.open?.[i],h=q.high?.[i],l=q.low?.[i],c=q.close?.[i],v=q.volume?.[i];if([o,h,l,c].every(x=>x!==null&&x!==undefined&&Number.isFinite(Number(x))))bars.push({t:new Date(ts[i]*1000).toISOString(),o:Number(o),h:Number(h),l:Number(l),c:Number(c),v:Number(v||0)});}
-  const meta=result.meta||{},last=bars[bars.length-1],mp=Number(meta.regularMarketPrice),price=Number.isFinite(mp)?mp:Number(last?.c),mt=Number(meta.regularMarketTime);
-  return {bars,trade:Number.isFinite(price)?{p:price,t:Number.isFinite(mt)&&mt>0?new Date(mt*1000).toISOString():last?.t||new Date().toISOString(),s:"YAHOO"}:null,currency:meta.currency||"THB",exchange:meta.fullExchangeName||meta.exchangeName||"SET"};
+  const meta=result.meta||{},last=bars[bars.length-1];
+  const mp=meta.regularMarketPrice===null||meta.regularMarketPrice===undefined?NaN:Number(meta.regularMarketPrice);
+  const price=Number.isFinite(mp)&&mp>0?mp:Number(last?.c);
+  const mt=meta.regularMarketTime===null||meta.regularMarketTime===undefined?NaN:Number(meta.regularMarketTime);
+  return {bars,trade:Number.isFinite(price)&&price>0?{p:price,t:Number.isFinite(mt)&&mt>0?new Date(mt*1000).toISOString():last?.t||new Date().toISOString(),s:"YAHOO"}:null,currency:meta.currency||"THB",exchange:meta.fullExchangeName||meta.exchangeName||"SET"};
 }
 async function fetchMarket(env,symbols,timeframe="1Day") {
   const thai=symbols.filter(isThaiSymbol),us=symbols.filter(x=>!isThaiSymbol(x)),stocks={};
