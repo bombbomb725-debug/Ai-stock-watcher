@@ -743,7 +743,7 @@ export default {
     if(url.pathname==="/line/webhook")return request.method==="POST"?handleLineWebhook(request,env):json({error:"Method not allowed"},405);
     if(request.method==="OPTIONS")return origin&&!ALLOWED_ORIGINS.has(origin)?json({error:"Origin not allowed"},403,headers):new Response(null,{status:204,headers});
     if(origin&&!ALLOWED_ORIGINS.has(origin))return json({error:"Origin not allowed",origin},403,headers);
-    if(url.pathname==="/"&&request.method==="GET")return json({service:"AI Stock Watcher API",status:"ready",multiUser:true,d1:dbReady(env),maxWatchlist:MAX_WATCHLIST,feed:"Alpaca IEX",scheduledScan:"* * * * *"},200,headers);
+    if(url.pathname==="/"&&request.method==="GET")return json({service:"AI Stock Watcher API",status:"ready",multiUser:true,d1:dbReady(env),maxWatchlist:MAX_WATCHLIST,feed:"Alpaca IEX + Yahoo Finance (unofficial)",scheduledScan:"* * * * *"},200,headers);
     if(request.method!=="GET"&&request.method!=="POST")return json({error:"Method not allowed"},405,headers);
     try{return await apiHandler(request,env,url,headers);}catch(e){console.error("API_ERROR",String(e));return json({error:"Internal API error",detail:String(e).slice(0,250)},500,headers);}
   },
