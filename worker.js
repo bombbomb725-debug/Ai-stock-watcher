@@ -13,6 +13,15 @@ function json(data,status=200,headers={}) {
 }
 function validSymbol(s) { return /^[A-Z][A-Z0-9.]{0,9}$/.test(s); }
 function cleanSymbol(s) { return String(s||"").trim().toUpperCase(); }
+function isThaiSymbol(s) { return /^[A-Z0-9]{1,8}\.BK$/.test(String(s||"").toUpperCase()); }
+let thaiSecuritiesCache=null,thaiSecuritiesCacheAt=0;
+async function getThaiSecurities() {
+  if(thaiSecuritiesCache&&Date.now()-thaiSecuritiesCacheAt<21600000)return thaiSecuritiesCache;
+  const r=await fetch("https://raw.githubusercontent.com/lumduan/thai-securities-data/main/thai_securities_compact_th.json");
+  if(!r.ok)throw new Error("Thai directory HTTP "+r.status);
+  const data=await r.json();if(!Array.isArray(data))throw new Error("Thai directory format invalid");
+  thaiSecuritiesCache=data;thaiSecuritiesCacheAt=Date.now();return data;
+}
 function dbReady(env) { return Boolean(env.DB); }
 
 async function verifyLineSignature(rawBody,signature,secret) {
@@ -257,6 +266,16 @@ function stockEntryPlan(bars) {
   const risk=Math.max(high-stop,atr*.5);
   return {low,high,stop,target:high+2*risk};
 }
+function thaiStockFlexBubble(symbol) {
+  const ticker=String(symbol).replace(/\.BK$/i,"");
+  const url="https://www.tradingview.com/chart/?symbol="+encodeURIComponent("SET:"+ticker);
+  return {type:"bubble",size:"kilo",body:{type:"box",layout:"vertical",backgroundColor:"#10243A",paddingAll:"16px",contents:[
+    {type:"text",text:ticker,size:"3xl",weight:"bold",color:"#FFFFFF"},
+    {type:"text",text:"หุ้นไทย · SET/mai",size:"sm",color:"#A9B8CC"},
+    {type:"text",text:"กราฟ TradingView เท่านั้น",size:"md",weight:"bold",color:"#F2C46D",margin:"lg"},
+    {type:"text",text:"ยังไม่มีข้อมูล OHLC ฟรีที่ยืนยันได้ จึงไม่คำนวณ RSI/MACD/ADX หรือแจ้งเตือนสัญญาณ",size:"xs",color:"#A9B8CC",wrap:true,margin:"sm"}
+  ]},footer:{type:"box",layout:"vertical",paddingAll:"12px",contents:[{type:"button",style:"primary",color:"#2877C7",action:{type:"uri",label:"เปิดกราฟ",uri:url}}]}};
+}
 function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
   const price=Number(trade?.p);
   const priceText=Number.isFinite(price)?"$"+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
@@ -416,14 +435,15 @@ async function handleLineWebhook(request,env) {
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
       const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
       try {
+        const usSymbols=pageSymbols.filter(symbol=>!isThaiSymbol(symbol));
         const [market,dailyMarket,states]=await Promise.all([
-          fetchMarket(env,pageSymbols,"5Min"),
-          fetchMarket(env,pageSymbols,"1Day"),
+          usSymbols.length?fetchMarket(env,usSymbols,"5Min"):Promise.resolve({stocks:{}}),
+          usSymbols.length?fetchMarket(env,usSymbols,"1Day"):Promise.resolve({stocks:{}}),
           env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
         ]);
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
-        const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[],dailyMarket.stocks?.[symbol]?.bars||[]));
+        const bubbles=pageSymbols.map(symbol=>isThaiSymbol(symbol)?thaiStockFlexBubble(symbol):stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[],dailyMarket.stocks?.[symbol]?.bars||[]));
         await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
         if(pageCount>1)await lineReply(env,event.replyToken,"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”");
       } catch(e) {
@@ -553,7 +573,7 @@ async function scanAlerts(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY, alerts_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
   const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol,COALESCE(p.alerts_enabled,1) AS alerts_enabled FROM watchlist w JOIN users u ON u.id=w.user_id LEFT JOIN user_preferences p ON p.user_id=u.id ORDER BY u.id,w.symbol").all();
   const watch=rows.results||[];
-  const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
+  const symbols=[...new Set([...watch.map(x=>x.symbol).filter(x=>!isThaiSymbol(x)),...SCREENER_SYMBOLS])];
   const market={};
   // Alpaca batch endpoints: at most 50 symbols per request, avoiding one request per ticker.
   for(let i=0;i<symbols.length;i+=50) {
@@ -581,6 +601,7 @@ async function scanAlerts(env) {
   const stateRows=await env.DB.prepare("SELECT user_id,symbol,status FROM user_stock_state").all();
   const stateByKey=new Map((stateRows.results||[]).map(x=>[x.user_id+"|"+x.symbol,x.status]));
   for(const item of watch) {
+    if(isThaiSymbol(item.symbol))continue;
     const data=market[item.symbol];
     if(!data)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
@@ -668,11 +689,13 @@ async function apiHandler(request,env,url,headers) {
   }
   if(url.pathname==="/api/assets"&&request.method==="GET") {
     const q=(url.searchParams.get("q")||"").trim().toUpperCase();if(!q||q.length>30)return json({assets:[]},200,headers);
-    const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};
-    const r=await fetch("https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",{headers:auth});
-    if(!r.ok)return json({error:"Alpaca asset search failed",status:r.status},502,headers);
-    const all=await r.json(),assets=all.filter(a=>a.tradable&&a.exchange&&((a.symbol||"").toUpperCase().includes(q)||(a.name||"").toUpperCase().includes(q))).slice(0,20).map(a=>({symbol:a.symbol,name:a.name,exchange:a.exchange}));
-    return json({assets},200,headers);
+    const [us,thai]=await Promise.allSettled([
+      (async()=>{const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};const r=await fetch("https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",{headers:auth});if(!r.ok)throw new Error("Alpaca HTTP "+r.status);const all=await r.json();return all.filter(a=>a.tradable&&a.exchange&&((a.symbol||"").toUpperCase().includes(q)||(a.name||"").toUpperCase().includes(q))).slice(0,12).map(a=>({symbol:a.symbol,name:a.name,exchange:a.exchange,market:"US"}));})(),
+      (async()=>{const all=await getThaiSecurities();return all.filter(x=>String(x.symbol||"").toUpperCase().includes(q)||String(x.name||"").toUpperCase().includes(q)).slice(0,12).map(x=>({symbol:String(x.symbol).toUpperCase()+".BK",name:x.name,exchange:x.market||"SET",market:"THAI"}));})()
+    ]);
+    const assets=[...(us.status==="fulfilled"?us.value:[]),...(thai.status==="fulfilled"?thai.value:[])].slice(0,20);
+    if(!assets.length&&us.status==="rejected"&&thai.status==="rejected")return json({error:"ค้นหาหุ้นไม่สำเร็จจากทั้งสองแหล่ง"},502,headers);
+    return json({assets,thaiDirectory:thai.status==="fulfilled"},200,headers);
   }
   if(url.pathname==="/api/signals"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
