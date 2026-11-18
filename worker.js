@@ -127,11 +127,17 @@ async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher �
   if(!r.ok)console.error("LINE_FLEX_REPLY_FAILED",r.status,(await r.text()).slice(0,400));
 }
 function stockChartImageUrl(bars) {
-  const rows=(bars||[]).slice(-48);
-  const values=rows.map(x=>Number(x.c)).filter(Number.isFinite);
-  if(values.length<2)return null;
-  const config={type:"line",data:{labels:values.map((_,i)=>i+1),datasets:[{data:values,borderColor:"#55A7FF",borderWidth:3,pointRadius:0,fill:false,tension:0.22}]},options:{legend:{display:false},layout:{padding:8},scales:{xAxes:[{display:false,gridLines:{display:false}}],yAxes:[{display:true,gridLines:{color:"rgba(160,180,210,.15)"},ticks:{fontColor:"#A9B8CC",maxTicksLimit:4}}]},plugins:{datalabels:{display:false}}}};
-  return "https://quickchart.io/chart?width=600&height=220&devicePixelRatio=2&backgroundColor=%230D1828&format=png&c="+encodeURIComponent(JSON.stringify(config));
+  const rows=(bars||[]).slice(-60);
+  const values=rows.map(x=>Number(x.c));
+  if(values.filter(Number.isFinite).length<2)return null;
+  const e20=emaSeries(values,20),e50=emaSeries(values,50);
+  const labels=values.map((_,i)=>i+1);
+  const config={type:"line",data:{labels,datasets:[
+    {label:"ราคา",data:values,borderColor:"#55A7FF",borderWidth:3,pointRadius:0,fill:false,tension:0.18,spanGaps:true},
+    {label:"EMA20",data:e20,borderColor:"#F2B84B",borderWidth:2,pointRadius:0,fill:false,tension:0.12,spanGaps:true},
+    {label:"EMA50",data:e50,borderColor:"#B58BEB",borderWidth:2,pointRadius:0,fill:false,tension:0.12,spanGaps:true}
+  ]},options:{legend:{display:true,labels:{fontColor:"#DCE6F2",boxWidth:16}},layout:{padding:8},scales:{xAxes:[{display:false,gridLines:{display:false}}],yAxes:[{display:true,gridLines:{color:"rgba(160,180,210,.15)"},ticks:{fontColor:"#A9B8CC",maxTicksLimit:4}}]},plugins:{datalabels:{display:false}}}};
+  return "https://quickchart.io/chart?width=600&height=240&devicePixelRatio=2&backgroundColor=%230D1828&format=png&c="+encodeURIComponent(JSON.stringify(config));
 }
 function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[]) {
   const price=Number(trade?.p);
