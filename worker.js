@@ -297,6 +297,14 @@ async function handleLineWebhook(request,env) {
         console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
         await lineReply(env,event.replyToken,"แสดงการ์ดหุ้นไม่สำเร็จ: "+String(e).slice(0,180));
       }
+    } else if(cmd.action==="test") {
+      try {
+        await linePush(env,lineUserId,"ทดสอบการแจ้งเตือน AI Stock Watcher สำเร็จ ✓\\nLINE Push ทำงานได้แล้ว\\nข้อความนี้เป็นการทดสอบ ไม่ใช่สัญญาณซื้อขาย");
+        await lineReply(env,event.replyToken,"ส่งข้อความทดสอบไปยัง LINE ของคุณแล้ว กรุณาตรวจดูข้อความจาก AI Stock Watcher");
+      } catch(e) {
+        console.error("LINE_TEST_PUSH_ERROR",String(e));
+        await lineReply(env,event.replyToken,"ส่งข้อความทดสอบไม่สำเร็จ กรุณาตรวจสอบ LINE Push: "+String(e).slice(0,180));
+      }
     } else if(cmd.action==="ideas") {
       const rows=await env.DB.prepare("SELECT symbol,score,status,rationale FROM stock_ideas ORDER BY score DESC, symbol LIMIT 15").all();
       const lines=(rows.results||[]).map((x,i)=>(i+1)+". "+x.symbol+" · "+x.score+"/5 · "+x.status+" — "+(x.rationale||"คะแนนทางเทคนิค")).join("\n");
