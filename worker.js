@@ -280,13 +280,13 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
   const thai=isThaiSymbol(symbol),currency=thai?"฿":"$";
   const price=Number(trade?.p);
   const priceText=Number.isFinite(price)?currency+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
-  const status=state?.status_label||"กำลังรอผลวิเคราะห์";
-  const score=Number.isFinite(Number(state?.score))?Number(state.score)+"/5":"—";
-  const checked=state?.checked_at?new Date(state.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอรอบสแกน";
-  const tone=state?.status==="buy"?"#16A36A":state?.status==="risk"?"#D94B59":"#D69B28";
+  const detail=analyzeStatus(dailyBars,price,thai?"Asia/Bangkok":"America/New_York");
+  const status=state?.status_label||detail.label;
+  const score=state&&state.score!==null&&state.score!==undefined?Number(state.score)+"/5":detail.score+"/5";
+  const checked=state?.checked_at?new Date(state.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"คำนวณล่าสุด";
+  const tone=(state?.status||detail.status)==="buy"?"#16A36A":(state?.status||detail.status)==="risk"?"#D94B59":"#D69B28";
   const chartUrl=stockChartImageUrl(bars);
   const plan=stockEntryPlan(dailyBars,thai?"Asia/Bangkok":"America/New_York");
-  const detail=analyzeStatus(dailyBars,price,thai?"Asia/Bangkok":"America/New_York");
   const money=n=>currency+Number(n).toFixed(2);
   const contents=[];
   if(chartUrl)contents.push({type:"image",url:chartUrl,size:"full",aspectRatio:"20:7",aspectMode:"fit"});
