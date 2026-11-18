@@ -25,7 +25,7 @@ const state = {
 function loadSavedSymbols(){
   try {
     const saved = JSON.parse(localStorage.getItem("stockWatcherSymbols") || "null");
-    return Array.isArray(saved) ? [...new Set(saved.filter(s=>typeof s==="string" && /^[A-Z][A-Z0-9.]{0,9}$/.test(s))) ] : [...DEFAULT_SYMBOLS];
+    return Array.isArray(saved) ? [...new Set(saved.filter(s=>typeof s==="string" && /^(?:[A-Z][A-Z0-9.]{0,9}|[A-Z0-9]{1,8}\\.BK)$/.test(s))) ] : [...DEFAULT_SYMBOLS];
   } catch { return [...DEFAULT_SYMBOLS]; }
 }
 function saveSymbols(){ localStorage.setItem("stockWatcherSymbols",JSON.stringify(state.symbols)); }
@@ -369,7 +369,8 @@ function isUsRegularSession(){
 }
 async function refreshIntradayBars(){
   if(!isUsRegularSession()||document.hidden||state.busy||state.intradayBusy||!Object.keys(state.market).length)return;
-  const symbols=Object.keys(state.market);
+  const symbols=Object.keys(state.market).filter(s=>!isThaiSymbol(s));
+  if(!symbols.length)return;
   state.intradayBusy=true;
   try{
     const data=await fetchMarket(symbols,"5Min");
@@ -385,7 +386,7 @@ async function refreshIntradayBars(){
 }
 async function refreshLiveQuotes(){
   if(!isUsRegularSession()||document.hidden||state.busy||!Object.keys(state.market).length)return;
-  const symbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
+  const symbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])].filter(s=>!isThaiSymbol(s));
   if(!symbols.length)return;
   try{
     const [data,signals]=await Promise.all([fetchLatestQuotes(symbols),fetchSignals(symbols)]);
@@ -415,21 +416,26 @@ async function loadMarket(){
   try{
     if(!state.symbols.length){$("#cards").innerHTML='<article class="stock-card">ยังไม่มีหุ้นใน Watchlist ค้นหาและเพิ่มหุ้นได้ด้านบน</article>';return;}
     const displaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
-    const [dailyMarket,intradayMarket,signals]=await Promise.all([fetchMarket(displaySymbols,"1Day"),fetchMarket(displaySymbols,"5Min"),fetchSignals(displaySymbols)]);
+    const usSymbols=displaySymbols.filter(s=>!isThaiSymbol(s)),thaiSymbols=displaySymbols.filter(isThaiSymbol);
+    const [dailyMarket,intradayMarket,signals]=await Promise.all([
+      usSymbols.length?fetchMarket(usSymbols,"1Day"):Promise.resolve({}),
+      usSymbols.length?fetchMarket(usSymbols,"5Min"):Promise.resolve({}),
+      usSymbols.length?fetchSignals(usSymbols):Promise.resolve({})
+    ]);
     state.market=dailyMarket;
-    for(const symbol of displaySymbols)if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
-    for(const symbol of displaySymbols)if(state.market[symbol])state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
-    $("#cards").innerHTML=displaySymbols.map(s=>state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+s+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>').join("");
-    state.symbols.forEach(s=>{if(state.market[s])maybeNotify(s,state.market[s]);});
+    for(const symbol of usSymbols)if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
+    for(const symbol of usSymbols)if(state.market[symbol])state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
+    $("#cards").innerHTML=displaySymbols.map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>')).join("");
+    state.symbols.filter(s=>!isThaiSymbol(s)).forEach(s=>{if(state.market[s])maybeNotify(s,state.market[s]);});
     const count=Object.values(state.market).reduce((n,x)=>n+(x.bars||[]).length,0);
-    setStatus("เชื่อมต่อแล้ว · Alpaca IEX",true);
+    setStatus(thaiSymbols.length?(usSymbols.length?"เชื่อมต่อแล้ว · หุ้นไทยแสดงกราฟเท่านั้น":"หุ้นไทย · กราฟ TradingView เท่านั้น"):"เชื่อมต่อแล้ว · Alpaca IEX",true);
     $("#updated").textContent="อัปเดต "+new Date().toLocaleString("th-TH")+" · ข้อมูลย้อนหลัง "+count+" แท่ง";
   }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#cards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p><small>ตรวจ Worker URL, CORS และ Secrets ใน Cloudflare</small></article>';}
   finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
 }
 async function addSymbol(symbol){
   symbol=String(symbol||"").trim().toUpperCase();
-  if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
+  if(!/^(?:[A-Z][A-Z0-9.]{0,9}|[A-Z0-9]{1,8}\\.BK)$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
   if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นแล้ว");return;}
   try {
