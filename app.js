@@ -348,7 +348,8 @@ async function fetchMarket(symbols,timeframe=state.timeframe){
   let successes=0;const errors=[];
   for(const outcome of outcomes){if(outcome.status==="fulfilled"){Object.assign(result,outcome.value);successes++;}else errors.push(String(outcome.reason));}
   if(!successes&&errors.length)throw new Error(errors.join(" · "));
-  result._marketErrors=errors;return result;
+  if(errors.length)console.warn("MARKET_PROVIDER_ERRORS",errors);
+  return result;
 }
 async function fetchSignals(symbols){
   const url=state.apiUrl.replace(/\/$/,"")+"/api/signals?symbols="+encodeURIComponent(symbols.join(","));
