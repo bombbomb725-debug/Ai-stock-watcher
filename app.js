@@ -17,7 +17,7 @@ const state = {
   market:{},
   timeframe:"1Day",
   apiUrl:localStorage.getItem("stockWatcherApiUrl") || "https://ai-stock-watcher-api.bombbomb725.workers.dev",
-  sessionToken:sessionStorage.getItem("stockWatcherSessionToken")||"",
+  sessionToken:localStorage.getItem("stockWatcherSessionToken")||sessionStorage.getItem("stockWatcherSessionToken")||"",
   user:null,
   shared:false,
   focusSymbol:(new URLSearchParams(location.search).get("symbol")||"").trim().toUpperCase()
@@ -272,7 +272,7 @@ async function pollLineLink() {
     const code=sessionStorage.getItem("stockWatcherLinkCode");
     if(code)showPairingCode(code);
   } catch(e) {
-    sessionStorage.removeItem("stockWatcherSessionToken");
+    localStorage.removeItem("stockWatcherSessionToken");sessionStorage.removeItem("stockWatcherSessionToken");
     sessionStorage.removeItem("stockWatcherLinkCode");
     sessionStorage.removeItem("stockWatcherLinkExpiry");
     state.sessionToken="";
@@ -288,7 +288,7 @@ async function startLinePairing() {
   if(!state.sessionToken||!code||expiry<=Date.now()) {
     const data=await apiRequest("/api/link/start",{method:"POST",body:"{}"});
     state.sessionToken=data.token;
-    sessionStorage.setItem("stockWatcherSessionToken",data.token);
+    localStorage.setItem("stockWatcherSessionToken",data.token);sessionStorage.setItem("stockWatcherSessionToken",data.token);
     sessionStorage.setItem("stockWatcherLinkCode",data.code);
     sessionStorage.setItem("stockWatcherLinkExpiry",String(data.expiresAt*1000));
     code=data.code;
@@ -329,7 +329,7 @@ async function initializeAccount() {
     loadMarket();
   } catch(e) {
     state.sessionToken="";
-    sessionStorage.removeItem("stockWatcherSessionToken");
+    localStorage.removeItem("stockWatcherSessionToken");sessionStorage.removeItem("stockWatcherSessionToken");
     sessionStorage.removeItem("stockWatcherLinkCode");
     sessionStorage.removeItem("stockWatcherLinkExpiry");
     try {
