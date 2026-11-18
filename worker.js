@@ -209,8 +209,8 @@ async function scanAlerts(env) {
     }
   }
   const checked=new Date().toISOString();
-  // Refresh Screener results on each scheduled scan. Legacy D1 schemas may not have scanned_at.
-  for(const symbol of SCREENER_SYMBOLS) {
+  // Refresh Screener every 15 minutes using cron time; no scanned_at column required.
+  if(new Date().getUTCMinutes()%15===0) for(const symbol of SCREENER_SYMBOLS) {
     const data=market[symbol];
     if(!data)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
