@@ -114,15 +114,22 @@ async function removeWatch(env,userId,symbol) {
   await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
   return {ok:true,symbols:await getWatchlist(env,userId)};
 }
-async function lineReply(env,replyToken,text) {
+function lineMenuQuickReply(extra=[]) {
+  const base=[
+    ["ดูหุ้นของฉัน","ดูหุ้นของฉัน"],["เพิ่มหุ้น","เพิ่มหุ้น"],["ลบหุ้น","ลบหุ้น"],
+    ["ราคาเข้าซื้อ","ราคาเข้าซื้อ"],["หุ้นน่าสนใจ","หุ้นน่าสนใจ"],["ตั้งค่าแจ้งเตือน","ตั้งค่าแจ้งเตือน"]
+  ].map(([label,text])=>({type:"action",action:{type:"message",label,text}}));
+  return {items:[...base,...extra].slice(0,13)};
+}
+async function lineReply(env,replyToken,text,quickReply=null) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
-  const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[{type:"text",text:String(text).slice(0,4900)}]})});
+  const message={type:"text",text:String(text).slice(0,4900),quickReply:quickReply||lineMenuQuickReply()};
+  const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
   if(!r.ok)console.error("LINE_REPLY_FAILED",r.status,(await r.text()).slice(0,250));
 }
 async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist",quickReply=null) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return false;
-  const message={type:"flex",altText,contents};
-  if(quickReply)message.quickReply=quickReply;
+  const message={type:"flex",altText,contents,quickReply:quickReply||lineMenuQuickReply()};
   try {
     const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
     if(r.ok)return true;
@@ -237,6 +244,12 @@ function parseLineCommand(text) {
   m=t.match(/^(?:เชื่อม|link)\s+([A-Z2-9]{8,12})$/i); if(m)return {action:"link",code:m[1].toUpperCase()};
   if(/^(?:ทดสอบแจ้งเตือน|ทดสอบการแจ้งเตือน|test alert|\/test-alert)$/i.test(t))return {action:"test"};
   if(/^(?:หุ้นแนะนำ|แนะนำหุ้น|ideas|\/ideas)$/i.test(t))return {action:"ideas"};
+  if(/^(?:ดูหุ้นของฉัน|ดูหุ้น|ราคาเข้าซื้อ|buy zones|menu|เมนู)$/i.test(t))return {action:"list",page:1};
+  if(/^(?:เพิ่มหุ้น|add stock)$/i.test(t))return {action:"add_prompt"};
+  if(/^(?:ลบหุ้น|remove stock)$/i.test(t))return {action:"remove_menu"};
+  if(/^(?:ตั้งค่าแจ้งเตือน|settings)$/i.test(t))return {action:"settings"};
+  if(/^(?:เปิดแจ้งเตือน|แจ้งเตือนเปิด)$/i.test(t))return {action:"alert_on"};
+  if(/^(?:ปิดแจ้งเตือน|แจ้งเตือนปิด)$/i.test(t))return {action:"alert_off"};
   return {action:"help"};
 }
 async function handleLineWebhook(request,env) {
@@ -251,7 +264,7 @@ async function handleLineWebhook(request,env) {
     if(event.type==="unfollow")continue;
     const user=await createOrUpdateUser(env,lineUserId,{});
     if(event.type==="follow") {
-      await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\n\nพิมพ์ “เพิ่ม NVDA” เพื่อเพิ่มหุ้น (สูงสุด 50 ตัว)\nพิมพ์ “ลบ NVDA” เพื่อลบ\nพิมพ์ “รายการหุ้น” เพื่อดูรายการ\nพิมพ์ “หุ้นแนะนำ” เพื่อดูหุ้นที่ Screener จัดอันดับ\n\nเชื่อมเว็บ: เปิดเว็บ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ที่ได้ในแชตนี้");
+      await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเลือกเมนูจากปุ่มด้านล่างเพื่อดูหุ้น เพิ่ม/ลบหุ้น หรือดูราคาเข้าซื้อ\n\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\nสูงสุด 50 หุ้นต่อคน\n\nเชื่อมเว็บ: เปิดเว็บไซต์ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ในแชตนี้");
       continue;
     }
     if(event.type!=="message"||event.message?.type!=="text")continue;
@@ -266,6 +279,26 @@ async function handleLineWebhook(request,env) {
         if((linked.meta?.changes||0)>0)await lineReply(env,event.replyToken,"เชื่อมบัญชีสำเร็จแล้ว! เว็บนี้ใช้ Watchlist เดียวกับ LINE ของคุณได้แล้ว");
         else await lineReply(env,event.replyToken,"รหัสนี้ถูกใช้ไปแล้ว กรุณาสร้างรหัสใหม่จากเว็บไซต์");
       }
+    } else if(cmd.action==="add_prompt") {
+      const picks=["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","MSFT"].map(symbol=>({type:"action",action:{type:"message",label:symbol,text:"เพิ่ม "+symbol}}));
+      await lineReply(env,event.replyToken,"เลือกหุ้นยอดนิยมจากปุ่ม หรือพิมพ์คำสั่ง “เพิ่ม NVDA” โดยเปลี่ยนเป็น Symbol ที่ต้องการ (สูงสุด 50 หุ้น)",lineMenuQuickReply(picks));
+    } else if(cmd.action==="remove_menu") {
+      const symbols=await getWatchlist(env,user.id);
+      if(!symbols.length)await lineReply(env,event.replyToken,"Watchlist ยังว่าง ไม่มีหุ้นให้ลบ");
+      else {
+        const picks=symbols.slice(0,7).map(symbol=>({type:"action",action:{type:"message",label:"ลบ "+symbol,text:"ลบ "+symbol}}));
+        await lineReply(env,event.replyToken,"แตะหุ้นที่ต้องการลบจาก Watchlist ("+symbols.length+" หุ้น)"+(symbols.length>7?" · แสดง 7 ตัวแรก":"") ,lineMenuQuickReply(picks));
+      }
+    } else if(cmd.action==="settings") {
+      await lineReply(env,event.replyToken,"ตั้งค่าแจ้งเตือนสถานะหุ้น\nเลือกเปิดหรือปิดการแจ้งเตือนการเปลี่ยนสถานะได้จากปุ่มด้านล่าง",lineMenuQuickReply([
+        {type:"action",action:{type:"message",label:"เปิดแจ้งเตือน",text:"เปิดแจ้งเตือน"}},
+        {type:"action",action:{type:"message",label:"ปิดแจ้งเตือน",text:"ปิดแจ้งเตือน"}}
+      ]));
+    } else if(cmd.action==="alert_on"||cmd.action==="alert_off") {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY, alerts_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
+      const enabled=cmd.action==="alert_on"?1:0;
+      await env.DB.prepare("INSERT INTO user_preferences(user_id,alerts_enabled) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET alerts_enabled=excluded.alerts_enabled,updated_at=CURRENT_TIMESTAMP").bind(user.id,enabled).run();
+      await lineReply(env,event.replyToken,enabled?"เปิดแจ้งเตือนการเปลี่ยนสถานะแล้ว":"ปิดแจ้งเตือนการเปลี่ยนสถานะแล้ว");
     } else if(cmd.action==="add") {
       const result=await addWatch(env,user.id,cmd.symbol);
       await lineReply(env,event.replyToken,result.ok?"เพิ่ม "+cmd.symbol+" ใน Watchlist แล้ว ("+result.symbols.length+"/50)":result.error);
@@ -311,7 +344,7 @@ async function handleLineWebhook(request,env) {
       const lines=(rows.results||[]).map((x,i)=>(i+1)+". "+x.symbol+" · "+x.score+"/5 · "+x.status+" — "+(x.rationale||"คะแนนทางเทคนิค")).join("\n");
       await lineReply(env,event.replyToken,"หุ้นที่ Screener จัดอันดับ (ไม่ใช่คำแนะนำการลงทุน)\n"+(lines||"ยังไม่มีผลคัดกรอง รอรอบสแกน"));
     } else {
-      await lineReply(env,event.replyToken,"คำสั่ง AI Stock Watcher\n• เพิ่ม NVDA\n• ลบ NVDA\n• รายการหุ้น\n• หุ้นแนะนำ\n• เชื่อม รหัส (เชื่อมเว็บกับ LINE)\nสูงสุด 50 หุ้นต่อคน");
+      await lineReply(env,event.replyToken,"เลือกเมนูด้านล่างได้เลยครับ\nดูหุ้น · เพิ่มหุ้น · ลบหุ้น · ราคาเข้าซื้อ · หุ้นน่าสนใจ · ตั้งค่าแจ้งเตือน\n\nยังพิมพ์ “เพิ่ม NVDA” หรือ “ลบ NVDA” ได้เช่นเดิม");
     }
   }
   return json({ok:true});
@@ -418,7 +451,8 @@ function analyzeStatus(bars,price) {
 }
 async function scanAlerts(env) {
   if(!dbReady(env)||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
-  const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol FROM watchlist w JOIN users u ON u.id=w.user_id ORDER BY u.id,w.symbol").all();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY, alerts_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
+  const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol FROM watchlist w JOIN users u ON u.id=w.user_id LEFT JOIN user_preferences p ON p.user_id=u.id WHERE COALESCE(p.alerts_enabled,1)=1 ORDER BY u.id,w.symbol").all();
   const watch=rows.results||[];
   const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
   const market={};
