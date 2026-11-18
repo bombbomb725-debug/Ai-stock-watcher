@@ -348,14 +348,15 @@ async function handleLineWebhook(request,env) {
   const raw=await request.arrayBuffer();
   if(!await verifyLineSignature(raw,request.headers.get("x-line-signature")||"",env.LINE_CHANNEL_SECRET))return json({error:"Invalid LINE signature"},401);
   let payload; try{payload=JSON.parse(new TextDecoder().decode(raw));}catch{return json({error:"Invalid JSON"},400);}
-  try { await ensureRichMenu(env); } catch(e) { console.error("LINE_RICH_MENU_SETUP_FAILED",String(e)); }
+  let activeRichMenuId=null; try { activeRichMenuId=await ensureRichMenu(env); } catch(e) { console.error("LINE_RICH_MENU_SETUP_FAILED",String(e)); }
   for(const event of payload.events||[]) {
     const lineUserId=event.source?.userId;
     if(!lineUserId)continue;
     if(event.type==="unfollow")continue;
+    if(activeRichMenuId) { try { const mr=await fetch("https://api.line.me/v2/bot/user/"+lineUserId+"/richmenu/"+activeRichMenuId,{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN}}); if(!mr.ok)console.error("LINE_USER_RICH_MENU_LINK_FAILED",mr.status,(await mr.text()).slice(0,200)); } catch(e) { console.error("LINE_USER_RICH_MENU_LINK_ERROR",String(e)); } }
     const user=await createOrUpdateUser(env,lineUserId,{});
     if(event.type==="follow") {
-      await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเลือกเมนูจากปุ่มด้านล่างเพื่อดูหุ้น เพิ่ม/ลบหุ้น หรือดูราคาเข้าซื้อ\n\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\nสูงสุด 50 หุ้นต่อคน\n\nเชื่อมเว็บ: เปิดเว็บไซต์ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ในแชตนี้");
+      await lineReply(env,event.replyToken,"ยินดีต้อนรับสู่ AI Stock Watcher!\nเริ่มต้นติดตาม: ASTS, RKLB, IONQ, OKLO\nสูงสุด 50 หุ้นต่อคน\n\nเชื่อมเว็บ: เปิดเว็บไซต์ AI Stock Watcher แล้วพิมพ์ “เชื่อม รหัส” ในแชตนี้");
       continue;
     }
     if(event.type!=="message"||event.message?.type!=="text")continue;
