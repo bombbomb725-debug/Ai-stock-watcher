@@ -501,7 +501,7 @@ async function fetchMarket(env,symbols,timeframe="1Day") {
   if(us.length){
     if(!env.ALPACA_KEY||!env.ALPACA_SECRET)throw new Error("Worker secrets ALPACA_KEY / ALPACA_SECRET missing");
     const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET},base="https://data.alpaca.markets/v2",end=new Date(),days=timeframe==="4Hour"?45:timeframe==="5Min"?3:140,start=new Date(end.getTime()-days*86400000);
-    const u=new URL(base+"/stocks/bars");u.searchParams.set("symbols",us.join(","));u.searchParams.set("timeframe",timeframe);u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());u.searchParams.set("limit","1000");u.searchParams.set("feed","iex");u.searchParams.set("sort","asc");u.searchParams.set("adjustment","raw");
+    const u=new URL(base+"/stocks/bars");u.searchParams.set("symbols",us.join(","));u.searchParams.set("timeframe",timeframe);u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());u.searchParams.set("limit","10000");u.searchParams.set("feed","iex");u.searchParams.set("sort","asc");u.searchParams.set("adjustment","raw");
     const tu=new URL(base+"/stocks/trades/latest");tu.searchParams.set("symbols",us.join(","));tu.searchParams.set("feed","iex");
     const [barResult,tradeResult]=await Promise.allSettled([fetch(u,{headers:auth}),fetch(tu,{headers:auth})]);
     if(barResult.status!=="fulfilled")throw new Error("Alpaca bars request failed: "+String(barResult.reason||"network error"));
