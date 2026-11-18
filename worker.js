@@ -512,7 +512,12 @@ async function fetchLatestTrades(env,symbols) {
   return data.trades||{};
 }
 async function fetchYahooThai(symbol,timeframe="1Day") {
-  const interval=timeframe==="5Min"?"5m":timeframe==="4Hour"?"60m":"1d",range=timeframe==="5Min"?"5d":timeframe==="4Hour"?"3mo":"1y",ttl=timeframe==="5Min"?30:300;
+  const interval=timeframe==="5Min"?"5m":timeframe==="4Hour"?"60m":"1d",range=timeframe==="5Min"?"5d":timeframe==="4Hour"?"3mo":"1y";
+  const ttl=timeframe==="5Min"?60:timeframe==="4Hour"?300:900;
+  const cache=caches.default,cacheId="https://ai-stock-watcher-cache.invalid/yahoo/"+encodeURIComponent(symbol)+"/"+timeframe;
+  const freshKey=new Request(cacheId+"/fresh"),staleKey=new Request(cacheId+"/stale");
+  const fresh=await cache.match(freshKey);
+  if(fresh)return await fresh.json();
   let payload=null,lastError=null;
   for(const host of ["query1.finance.yahoo.com","query2.finance.yahoo.com"])try{
     const url="https://"+host+"/v8/finance/chart/"+encodeURIComponent(symbol)+"?range="+range+"&interval="+interval+"&events=div%2Csplits";
@@ -520,7 +525,14 @@ async function fetchYahooThai(symbol,timeframe="1Day") {
     if(!r.ok)throw new Error("Yahoo HTTP "+r.status);
     payload=await r.json();if(payload?.chart?.error)throw new Error(payload.chart.error.description||"Yahoo chart error");break;
   }catch(e){lastError=e;}
-  if(!payload)throw new Error("Yahoo Finance unavailable for "+symbol+": "+String(lastError||"no response"));
+  if(!payload){
+    const stale=await cache.match(staleKey);
+    if(stale){
+      const saved=await stale.json();
+      return {...saved,trade:null,stale:true,error:"Yahoo Finance จำกัดการเรียกข้อมูล ("+String(lastError||"unavailable")+"); แสดงเฉพาะแท่งย้อนหลังที่บันทึกไว้ จึงงดแสดงราคาล่าสุดและสัญญาณซื้อ"};
+    }
+    throw new Error("Yahoo Finance unavailable for "+symbol+": "+String(lastError||"no response"));
+  }
   const result=payload.chart?.result?.[0];if(!result)throw new Error("Yahoo returned no price history for "+symbol);
   const q=result.indicators?.quote?.[0]||{},ts=result.timestamp||[],bars=[];
   for(let i=0;i<ts.length;i++){const o=q.open?.[i],h=q.high?.[i],l=q.low?.[i],c=q.close?.[i],v=q.volume?.[i];if([o,h,l,c].every(x=>x!==null&&x!==undefined&&Number.isFinite(Number(x))))bars.push({t:new Date(ts[i]*1000).toISOString(),o:Number(o),h:Number(h),l:Number(l),c:Number(c),v:Number(v||0)});}
@@ -528,7 +540,11 @@ async function fetchYahooThai(symbol,timeframe="1Day") {
   const mp=meta.regularMarketPrice===null||meta.regularMarketPrice===undefined?NaN:Number(meta.regularMarketPrice);
   const price=Number.isFinite(mp)&&mp>0?mp:Number(last?.c);
   const mt=meta.regularMarketTime===null||meta.regularMarketTime===undefined?NaN:Number(meta.regularMarketTime);
-  return {bars,trade:Number.isFinite(price)&&price>0?{p:price,t:Number.isFinite(mt)&&mt>0?new Date(mt*1000).toISOString():last?.t||new Date().toISOString(),s:"YAHOO"}:null,currency:meta.currency||"THB",exchange:meta.fullExchangeName||meta.exchangeName||"SET"};
+  const data={bars,trade:Number.isFinite(price)&&price>0?{p:price,t:Number.isFinite(mt)&&mt>0?new Date(mt*1000).toISOString():last?.t||new Date().toISOString(),s:"YAHOO"}:null,currency:meta.currency||"THB",exchange:meta.fullExchangeName||meta.exchangeName||"SET"};
+  const body=JSON.stringify(data);
+  await cache.put(freshKey,new Response(body,{headers:{"Content-Type":"application/json","Cache-Control":"public, max-age="+ttl}}));
+  await cache.put(staleKey,new Response(body,{headers:{"Content-Type":"application/json","Cache-Control":"public, max-age=604800"}}));
+  return data;
 }
 async function fetchMarket(env,symbols,timeframe="1Day") {
   const thai=symbols.filter(isThaiSymbol),us=symbols.filter(x=>!isThaiSymbol(x)),stocks={};
