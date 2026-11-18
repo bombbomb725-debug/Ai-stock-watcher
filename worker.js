@@ -102,25 +102,32 @@ async function createOrUpdateUser(env,lineUserId,profile={}) {
 }
 async function normalizeSymbols(env,symbols) {
   const input=[...new Set((symbols||[]).map(cleanSymbol))];
+  const knownThai=new Set(["UVAN"]);
   const bare=input.filter(s=>/^[A-Z0-9]{1,8}$/.test(s));
   if(!bare.length)return input;
+  let thai=knownThai;
   try {
     const directory=await getThaiSecurities();
-    const thai=new Set(directory.map(x=>String(x.symbol||"").toUpperCase()));
-    return input.map(s=>thai.has(s)?s+".BK":s);
+    thai=new Set([...knownThai,...directory.map(x=>String(x.symbol||"").toUpperCase())]);
   } catch(e) {
     console.warn("THAI_SYMBOL_RESOLUTION_UNAVAILABLE",String(e));
-    return input;
   }
+  return input.map(s=>thai.has(s)?s+".BK":s);
 }
 async function normalizeSymbol(env,symbol) {
   return (await normalizeSymbols(env,[symbol]))[0]||cleanSymbol(symbol);
 }
 async function getWatchlist(env,userId) {
-  // Symbols are normalized when added/removed; reading a saved watchlist must not
-  // wait for the external Thai securities directory on every LINE request.
   const r=await env.DB.prepare("SELECT symbol FROM watchlist WHERE user_id=? ORDER BY COALESCE(added_at,created_at),symbol").bind(userId).all();
-  return [...new Set((r.results||[]).map(x=>cleanSymbol(x.symbol)))];
+  const raw=(r.results||[]).map(x=>cleanSymbol(x.symbol));
+  const normalized=await normalizeSymbols(env,raw);
+  // Repair legacy bare Thai tickers already stored before directory lookup succeeded.
+  for(let i=0;i<raw.length;i++) {
+    if(normalized[i]!==raw[i]) {
+      await env.DB.prepare("UPDATE watchlist SET symbol=? WHERE user_id=? AND symbol=?").bind(normalized[i],userId,raw[i]).run();
+    }
+  }
+  return [...new Set(normalized)];
 }
 async function addWatch(env,userId,symbol) {
   symbol=await normalizeSymbol(env,symbol);
