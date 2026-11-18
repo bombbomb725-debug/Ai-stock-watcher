@@ -179,44 +179,20 @@ async function apiRequest(path,options={}) {
   if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
   return data;
 }
-async function initializeAccount() {
-  const liffId=window.AI_STOCK_WATCHER_CONFIG?.LIFF_ID||"";
-  if(!liffId||liffId.includes("ใส่")) {
-    setStatus("รอตั้งค่า LINE Login / LIFF");
-    $("#accountStatus").textContent="ยังไม่ได้ตั้งค่า LIFF ID — Watchlist ยังไม่ซิงก์ข้ามเว็บกับ LINE";
-    loadMarket();
-    return;
-  }
-  try {
-    await liff.init({liffId});
-    if(!liff.isLoggedIn()) { liff.login({redirectUri:location.href}); return; }
-    let profile=null;
-    if(state.sessionToken) {
-      try { profile=await apiRequest("/api/me"); }
-      catch { state.sessionToken="";sessionStorage.removeItem("stockWatcherSessionToken"); }
-    }
-    if(!profile) {
-      const idToken=liff.getIDToken();
-      if(!idToken)throw new Error("ไม่พบ LINE ID Token กรุณาเปิดผ่าน LIFF แล้วเข้าสู่ระบบใหม่");
-      const auth=await apiRequest("/api/auth/line",{method:"POST",body:JSON.stringify({idToken})});
-      state.sessionToken=auth.token;sessionStorage.setItem("stockWatcherSessionToken",auth.token);
-      profile={user:auth.user,symbols:auth.symbols};
-    }
-    state.user=profile.user||null;state.symbols=profile.symbols||[];
-    state.shared=true;renderWatchlist();
-    $("#accountStatus").textContent="เข้าสู่ระบบแล้ว"+(state.user?.displayName?" · "+state.user.displayName:"")+" · Watchlist เดียวกับ LINE";
-    setStatus("เชื่อมต่อบัญชี LINE และ Watchlist กลางแล้ว",true);
-    loadMarket();
-  } catch(e) {
-    state.shared=false;setStatus("เชื่อมต่อ LINE ไม่สำเร็จ");
-    $("#accountStatus").textContent="เข้าสู่ระบบไม่สำเร็จ: "+e.message;
-    loadMarket();
-  }
+function initializeAccount() {
+  state.shared=false;
+  state.user=null;
+  state.symbols=loadSavedSymbols();
+  renderWatchlist();
+  $("#accountStatus").textContent="Watchlist บันทึกไว้ในเว็บนี้";
+  setStatus("พร้อมใช้งาน");
+  loadMarket();
 }
 async function removeSymbol(symbol) {
-  if(!state.shared){setStatus("กรุณาเข้าสู่ระบบ LINE เพื่อแก้ไข Watchlist กลาง");return;}
-  try { const result=await apiRequest("/api/watchlist/remove",{method:"POST",body:JSON.stringify({symbol})});state.symbols=result.symbols||[];renderWatchlist();loadMarket(); }
-  catch(e){setStatus("ลบหุ้นไม่สำเร็จ: "+e.message);}
+  state.symbols=state.symbols.filter(s=>s!==symbol);
+  saveSymbols();
+  renderWatchlist();
+  loadMarket();
 }
 function renderIdeas(){
   const root=$("#ideas");
@@ -317,15 +293,13 @@ async function loadMarket(){
 async function addSymbol(symbol){
   symbol=String(symbol||"").trim().toUpperCase();
   if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
-  if(!state.shared){setStatus("กรุณาเข้าสู่ระบบ LINE ก่อนเพิ่มหุ้นใน Watchlist กลาง");return;}
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
-  if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นต่อคนแล้ว");return;}
-  try {
-    const result=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
-    state.symbols=result.symbols||[];renderWatchlist();
-    $("#searchResults").innerHTML="";$("#stockSearch").value="";
-    loadMarket();
-  } catch(e){setStatus("เพิ่มหุ้นไม่สำเร็จ: "+e.message);}
+  if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นแล้ว");return;}
+  state.symbols.push(symbol);
+  saveSymbols();
+  renderWatchlist();
+  $("#searchResults").innerHTML="";$("#stockSearch").value="";
+  loadMarket();
 }
 async function searchAssets(){
   const q=$("#stockSearch").value.trim();if(!q)return;
