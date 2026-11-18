@@ -392,11 +392,10 @@ function parseLineCommand(text) {
   if(/^(?:ปิดแจ้งเตือน|แจ้งเตือนปิด)$/i.test(t))return {action:"alert_off"};
   return {action:"help"};
 }
-async function handleLineWebhook(request,env) {
+async function handleLineWebhook(raw,signature,env) {
   if(!env.LINE_CHANNEL_SECRET||!env.LINE_CHANNEL_ACCESS_TOKEN)return json({error:"LINE secrets are missing"},503);
   if(!dbReady(env))return json({error:"D1 binding DB is missing"},503);
-  const raw=await request.arrayBuffer();
-  if(!await verifyLineSignature(raw,request.headers.get("x-line-signature")||"",env.LINE_CHANNEL_SECRET))return json({error:"Invalid LINE signature"},401);
+  if(!await verifyLineSignature(raw,signature||"",env.LINE_CHANNEL_SECRET))return json({error:"Invalid LINE signature"},401);
   let payload; try{payload=JSON.parse(new TextDecoder().decode(raw));}catch{return json({error:"Invalid JSON"},400);}
   for(const event of payload.events||[]) {
     const lineUserId=event.source?.userId;
@@ -835,8 +834,10 @@ export default {
     const url=new URL(request.url),origin=request.headers.get("Origin")||"",headers=corsHeaders(origin);
     if(url.pathname==="/line/webhook") {
       if(request.method!=="POST")return json({error:"Method not allowed"},405);
-      // Acknowledge LINE immediately; process commands and market-data calls in the background.
-      ctx.waitUntil(handleLineWebhook(request.clone(),env).then(result=>{
+      // Buffer the tiny LINE payload before responding; never read the Request stream in waitUntil.
+      const raw=await request.arrayBuffer();
+      const signature=request.headers.get("x-line-signature")||"";
+      ctx.waitUntil(handleLineWebhook(raw,signature,env).then(result=>{
         if(result.status>=400)console.error("LINE_WEBHOOK_BACKGROUND_FAILED",result.status);
       }).catch(error=>console.error("LINE_WEBHOOK_BACKGROUND_ERROR",String(error))));
       return json({ok:true});
