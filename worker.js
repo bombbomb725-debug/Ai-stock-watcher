@@ -11,7 +11,7 @@ function corsHeaders(origin) {
 function json(data,status=200,headers={}) {
   return new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store",...headers}});
 }
-function validSymbol(s) { return /^[A-Z][A-Z0-9.]{0,9}$/.test(s); }
+function validSymbol(s) { return /^(?:[A-Z][A-Z0-9.]{0,9}|[A-Z0-9]{1,8}\.BK)$/.test(s); }
 function cleanSymbol(s) { return String(s||"").trim().toUpperCase(); }
 function isThaiSymbol(s) { return /^[A-Z0-9]{1,8}\.BK$/.test(String(s||"").toUpperCase()); }
 let thaiSecuritiesCache=null,thaiSecuritiesCacheAt=0;
