@@ -348,10 +348,11 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
   const price=Number(trade?.p);
   const priceText=Number.isFinite(price)?currency+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
   const detail=analyzeStatus(dailyBars,price,thai?"Asia/Bangkok":"America/New_York");
-  const status=state?.status_label||detail.label;
-  const score=state&&state.score!==null&&state.score!==undefined?Number(state.score)+"/5":detail.score+"/5";
+  const dataUnavailable=thai&&(!trade||!Number.isFinite(price)||!dailyBars||dailyBars.length<20);
+  const status=dataUnavailable?"รอข้อมูล":(state?.status_label||detail.label);
+  const score=dataUnavailable?"—/5":(state&&state.score!==null&&state.score!==undefined?Number(state.score)+"/5":detail.score+"/5");
   const checked=state?.checked_at?new Date(state.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"คำนวณล่าสุด";
-  const tone=(state?.status||detail.status)==="buy"?"#16A36A":(state?.status||detail.status)==="risk"?"#D94B59":"#D69B28";
+  const tone=!dataUnavailable&&(state?.status||detail.status)==="buy"?"#16A36A":!dataUnavailable&&(state?.status||detail.status)==="risk"?"#D94B59":"#D69B28";
   const chartUrl=stockChartImageUrl(bars);
   const plan=stockEntryPlan(dailyBars,thai?"Asia/Bangkok":"America/New_York");
   const money=n=>currency+Number(n).toFixed(2);
@@ -367,7 +368,7 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
       {type:"text",text:"คะแนน AI",size:"sm",color:"#A9B8CC",flex:1},
       {type:"text",text:score,size:"sm",weight:"bold",color:"#FFFFFF",flex:4}
     ]},
-    {type:"text",text:"EMA20/50 "+(Number.isFinite(detail.ema20)?detail.ema20.toFixed(2):"—")+" / "+(Number.isFinite(detail.ema50)?detail.ema50.toFixed(2):"—")+" · RSI14 "+(Number.isFinite(detail.rsi)?detail.rsi.toFixed(1):"—")+" · MACD "+(Number.isFinite(detail.macd)?detail.macd.toFixed(3):"—")+" · ADX14 "+(Number.isFinite(detail.adx)?detail.adx.toFixed(1):"—"),size:"xs",color:"#A9B8CC",wrap:true},
+    {type:"text",text:dataUnavailable?"EMA20/50 — / — · RSI14 — · MACD — · ADX14 —":"EMA20/50 "+(Number.isFinite(detail.ema20)?detail.ema20.toFixed(2):"—")+" / "+(Number.isFinite(detail.ema50)?detail.ema50.toFixed(2):"—")+" · RSI14 "+(Number.isFinite(detail.rsi)?detail.rsi.toFixed(1):"—")+" · MACD "+(Number.isFinite(detail.macd)?detail.macd.toFixed(3):"—")+" · ADX14 "+(Number.isFinite(detail.adx)?detail.adx.toFixed(1):"—"),size:"xs",color:"#A9B8CC",wrap:true},
     {type:"text",text:(thai?"ราคาอ้างอิง DataCedar · ราคาปิดรายวัน":"กราฟราคาและข้อมูลรายวัน · Alpaca IEX")+" · อัปเดตสัญญาณ: "+checked,size:"xs",color:"#8293A9",wrap:true}
   );
   if(plan)contents.push(
@@ -386,7 +387,7 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
     ]},
     {type:"text",text:"ราคาอ้างอิงจากแท่งรายวันที่ปิดแล้ว · เป็นโซนประมาณการ ไม่ใช่คำสั่งซื้อ",size:"xs",color:"#8293A9",wrap:true}
   );
-  else contents.push({type:"text",text:"ข้อมูลรายวันยังไม่พอคำนวณโซนเข้าซื้อ",size:"xs",color:"#D69B28",wrap:true});
+  else contents.push({type:"text",text:dataUnavailable?"แหล่งข้อมูลราคาหุ้นไทยขัดข้องหรือข้อมูลย้อนหลังไม่ครบ จึงยังไม่ประเมินแนวโน้มและโซนเข้าซื้อ":"ข้อมูลรายวันยังไม่พอคำนวณโซนเข้าซื้อ",size:"xs",color:"#D69B28",wrap:true});
   return {
     type:"bubble",size:"kilo",
     header:{type:"box",layout:"horizontal",contents:[
@@ -596,7 +597,7 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(fresh)return await fresh.json();
   const sid="set:"+symbol.replace(/\.BK$/i,"").toUpperCase();
   const url="https://api.datacedar.com/v3/stocks/"+encodeURIComponent(sid)+"/bars?timeframe="+tf+"&adjustment=raw&order=asc&limit=500";
-  const r=await fetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(8000)});
+  let r;try{r=await fetch(url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(15000)});}catch(e){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar timeout/network: "+String(e)+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw e;}
   if(!r.ok){const detail=(await r.text()).slice(0,240),stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar API "+r.status+": "+detail+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw new Error("DataCedar API "+r.status+": "+detail);}
   const payload=await r.json();if(payload?.error)throw new Error(payload.error.message||"DataCedar API error");
   if(!Array.isArray(payload?.data))throw new Error("DataCedar response format invalid");
