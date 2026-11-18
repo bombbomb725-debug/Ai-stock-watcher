@@ -255,7 +255,9 @@ function rsi(values,p=14) {
   return al===0?100:100-100/(1+ag/al);
 }
 function analyzeStatus(bars,price) {
-  const done=bars.length&&bars.at(-1)?.t&&new Date(bars.at(-1).t).toISOString().slice(0,10)===new Date().toISOString().slice(0,10)?bars.slice(0,-1):bars;
+  const lastBar=bars.at(-1);
+  const nyDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+  const done=lastBar?.t&&nyDate(new Date(lastBar.t))===nyDate(new Date())?bars.slice(0,-1):bars;
   const closes=done.map(b=>Number(b.c)).filter(Number.isFinite);
   if(closes.length<55)return {status:"wait",label:"ข้อมูลย้อนหลังไม่พอ",score:0};
   const e20=ema(closes,20),e50=ema(closes,50),r=rsi(closes),s20=emaSeries(closes,20),s50=emaSeries(closes,50);
@@ -267,7 +269,9 @@ function analyzeStatus(bars,price) {
   const vols=done.slice(-21,-1).map(x=>Number(x.v)).filter(Number.isFinite),avg=vols.length?vols.reduce((a,b)=>a+b,0)/vols.length:0;
   const vol=avg>0&&Number(done.at(-1)?.v)>=avg*1.3,confirmed=trend&&momentum,strong=confirmed&&breakout&&vol;
   const score=[trend,momentum,breakout,vol,macd.at(-1)>sig].filter(Boolean).length;
-  return {status:strong?"buy":confirmed?"buy":r<45||(!trend&&price<e20&&e20<e50)?"risk":"wait",label:strong?"ขาขึ้นยืนยัน + เบรกเอาต์":confirmed?"BUY SIGNAL · แนวโน้มขาขึ้น":r<45?"แนวโน้มยังอ่อน":"รอการยืนยันแนวโน้ม",score};
+  const status=strong?"buy":confirmed?"buy":r<45||(!trend&&Number.isFinite(price)&&price<e20&&e20<e50)?"risk":"wait";
+  const label=strong?"ขาขึ้นยืนยัน + เบรกเอาต์":confirmed?"BUY SIGNAL · แนวโน้มขาขึ้น":status==="risk"?"แนวโน้มยังอ่อน":Number.isFinite(price)&&price>e20&&!trend?"เริ่มฟื้นตัว · รอยืนยัน":"รอการยืนยันแนวโน้ม";
+  return {status,label,score};
 }
 async function scanAlerts(env) {
   if(!dbReady(env)||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
@@ -374,6 +378,16 @@ async function apiHandler(request,env,url,headers) {
     if(!r.ok)return json({error:"Alpaca asset search failed",status:r.status},502,headers);
     const all=await r.json(),assets=all.filter(a=>a.tradable&&a.exchange&&((a.symbol||"").toUpperCase().includes(q)||(a.name||"").toUpperCase().includes(q))).slice(0,20).map(a=>({symbol:a.symbol,name:a.name,exchange:a.exchange}));
     return json({assets},200,headers);
+  }
+  if(url.pathname==="/api/signals"&&request.method==="GET") {
+    if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
+    const symbols=[...new Set((url.searchParams.get("symbols")||"").split(",").map(cleanSymbol).filter(validSymbol))];
+    if(!symbols.length)return json({signals:{}},200,headers);
+    if(symbols.length>50)return json({error:"Maximum 50 symbols per request",max:50},400,headers);
+    const rows=await env.DB.prepare("SELECT s.symbol,s.status,s.status_label,s.score,s.last_price,s.checked_at FROM user_stock_state s WHERE s.symbol IN ("+symbols.map(()=>"?").join(",")+") AND s.checked_at=(SELECT MAX(s2.checked_at) FROM user_stock_state s2 WHERE s2.symbol=s.symbol)").bind(...symbols).all();
+    const signals={};
+    for(const row of rows.results||[])signals[row.symbol]=row;
+    return json({signals},200,headers);
   }
   if(url.pathname==="/api/quotes"&&request.method==="GET") {
     const requested=(url.searchParams.get("symbols")||"").split(",").map(cleanSymbol).filter(validSymbol);
