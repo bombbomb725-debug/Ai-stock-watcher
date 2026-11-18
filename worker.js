@@ -119,10 +119,22 @@ async function normalizeSymbol(env,symbol) {
 }
 async function getWatchlist(env,userId) {
   const r=await env.DB.prepare("SELECT symbol,COALESCE(added_at,created_at) AS added_at FROM watchlist WHERE user_id=? ORDER BY COALESCE(added_at,created_at),symbol").bind(userId).all();
-  return await normalizeSymbols(env,(r.results||[]).map(x=>x.symbol));
+  const rows=r.results||[],normalized=await normalizeSymbols(env,rows.map(x=>x.symbol));
+  for(let i=0;i<rows.length;i++) {
+    const old=rows[i].symbol,next=normalized[i];
+    if(old===next)continue;
+    const exists=await env.DB.prepare("SELECT 1 AS yes FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,next).first();
+    if(exists)await env.DB.prepare("DELETE FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,old).run();
+    else await env.DB.prepare("UPDATE watchlist SET symbol=? WHERE user_id=? AND symbol=?").bind(next,userId,old).run();
+    const state=await env.DB.prepare("SELECT 1 AS yes FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,next).first();
+    if(state)await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,old).run();
+    else await env.DB.prepare("UPDATE user_stock_state SET symbol=? WHERE user_id=? AND symbol=?").bind(next,userId,old).run();
+  }
+  return [...new Set(normalized)];
 }
 async function addWatch(env,userId,symbol) {
   symbol=await normalizeSymbol(env,symbol);
+  await getWatchlist(env,userId);
   const exists=await env.DB.prepare("SELECT 1 AS yes FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,symbol).first();
   if(exists)return {ok:true,already:true,symbols:await getWatchlist(env,userId)};
   const count=await env.DB.prepare("SELECT COUNT(*) AS n FROM watchlist WHERE user_id=?").bind(userId).first();
@@ -132,6 +144,7 @@ async function addWatch(env,userId,symbol) {
 }
 async function removeWatch(env,userId,symbol) {
   symbol=await normalizeSymbol(env,symbol);
+  await getWatchlist(env,userId);
   await env.DB.prepare("DELETE FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
   await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
   return {ok:true,symbols:await getWatchlist(env,userId)};
