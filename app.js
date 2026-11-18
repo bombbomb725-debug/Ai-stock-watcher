@@ -197,9 +197,9 @@ function renderCard(symbol,item){
   const change=Number.isFinite(price)&&Number.isFinite(prev)&&prev!==0?(price-prev)/prev*100:null;
   const cls=change===null?"neutral":change>=0?"positive":"negative";
   const completedHistory=completedBars(bars,state.timeframe,thai?"Asia/Bangkok":"America/New_York");
-  const dataReady=completedHistory.length>=55&&Number.isFinite(price)&&price>0;
+  const dataReady=!item.stale&&completedHistory.length>=55&&Number.isFinite(price)&&price>0;
   const decision=!dataReady
-    ? {label:"รอข้อมูล",tone:"yellow",detail:"ราคาล่าสุดหรือข้อมูลย้อนหลังยังไม่ครบ จึงยังประเมินจังหวะซื้อไม่ได้"}
+    ? {label:"รอข้อมูล",tone:"yellow",detail:item.stale?"ข้อมูลที่แสดงเป็นข้อมูลย้อนหลังจากแคช ไม่ใช่ราคาล่าสุด จึงงดประเมินจังหวะซื้อ":"ราคาล่าสุดหรือข้อมูลย้อนหลังยังไม่ครบ จึงยังประเมินจังหวะซื้อไม่ได้"}
     : a.kind==="buy"
     ? {label:"ซื้อได้",tone:"green",detail:a.strong?"แนวโน้มขาขึ้นยืนยันแล้ว และราคาทะลุจุดสูงเดิมพร้อมวอลุ่ม":"แนวโน้มขาขึ้นผ่านเงื่อนไขหลักแล้ว แต่ควรรอเข้าตามโซน ไม่ไล่ราคา"}
     : a.kind==="risk"
