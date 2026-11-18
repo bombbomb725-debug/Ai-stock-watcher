@@ -333,7 +333,7 @@ function parseLineCommand(text) {
   m=t.match(/^(?:รายการหุ้น|รายชื่อหุ้น|ดูรายการหุ้น|ดูหุ้น|list|\/list)(?:\s+(\d+))?$/i); if(m)return {action:"list",page:Math.max(1,Number(m[1]||1))};
   m=t.match(/^(?:เชื่อม|link)\s+([A-Z2-9]{8,12})$/i); if(m)return {action:"link",code:m[1].toUpperCase()};
   if(/^(?:ทดสอบแจ้งเตือน|ทดสอบการแจ้งเตือน|test alert|\/test-alert)$/i.test(t))return {action:"test"};
-  if(/^(?:หุ้นแนะนำ|แนะนำหุ้น|หุ้นที่น่าสนใจ|ideas|\/ideas)$/i.test(t))return {action:"ideas"};
+  if(/^(?:หุ้นแนะนำ|แนะนำหุ้น|หุ้นที่น่าสนใจ|หุ้นน่าสนใจ|ideas|\/ideas)$/i.test(t))return {action:"ideas"};
   if(/^(?:ดูหุ้นของฉัน|ดูหุ้น|ราคาเข้าซื้อ|buy zones|menu|เมนู)$/i.test(t))return {action:"list",page:1};
   if(/^(?:เพิ่มหุ้น|add stock)$/i.test(t))return {action:"add_prompt"};
   if(/^(?:ลบหุ้น|remove stock)$/i.test(t))return {action:"remove_menu"};
