@@ -204,22 +204,15 @@ async function ensureRichMenu(env) {
   return menu.richMenuId;
 }
 
-function lineMenuQuickReply(extra=[]) {
-  const base=[
-    ["ดูหุ้นของฉัน","ดูหุ้นของฉัน"],["เพิ่มหุ้น","เพิ่มหุ้น"],["ลบหุ้น","ลบหุ้น"],
-    ["ราคาเข้าซื้อ","ราคาเข้าซื้อ"],["หุ้นน่าสนใจ","หุ้นน่าสนใจ"],["ตั้งค่าแจ้งเตือน","ตั้งค่าแจ้งเตือน"]
-  ].map(([label,text])=>({type:"action",action:{type:"message",label,text}}));
-  return {items:[...base,...extra].slice(0,13)};
-}
-async function lineReply(env,replyToken,text,quickReply=null) {
+async function lineReply(env,replyToken,text) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
-  const message={type:"text",text:String(text).slice(0,4900),...(quickReply?{quickReply}:{})};
+  const message={type:"text",text:String(text).slice(0,4900)};
   const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
   if(!r.ok)console.error("LINE_REPLY_FAILED",r.status,(await r.text()).slice(0,250));
 }
-async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist",quickReply=null) {
+async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist") {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return false;
-  const message={type:"flex",altText,contents,...(quickReply?.items?.length?{quickReply:lineMenuQuickReply(quickReply.items)}:{})};
+  const message={type:"flex",altText,contents};
   try {
     const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
     if(r.ok)return true;
@@ -391,14 +384,10 @@ async function handleLineWebhook(request,env) {
       if(!symbols.length)await lineReply(env,event.replyToken,"Watchlist ยังว่าง ไม่มีหุ้นให้ลบ");
       else {
         await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"remove",Math.floor(Date.now()/1000)+600).run();
-        const picks=symbols.slice(0,7).map(symbol=>({type:"action",action:{type:"message",label:"ลบ "+symbol,text:"ลบ "+symbol}}));
-        await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการลบได้เลย เช่น AMZN NVDA หรือ AMZN,NVDA หรือแตะปุ่มหุ้นด้านล่าง ("+symbols.length+" หุ้น)",lineMenuQuickReply(picks));
+        await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการลบได้เลย เช่น AMZN NVDA หรือ AMZN,NVDA ("+symbols.length+" หุ้นในรายการ)");
       }
     } else if(cmd.action==="settings") {
-      await lineReply(env,event.replyToken,"ตั้งค่าแจ้งเตือนสถานะหุ้น\nเลือกเปิดหรือปิดการแจ้งเตือนการเปลี่ยนสถานะได้จากปุ่มด้านล่าง",lineMenuQuickReply([
-        {type:"action",action:{type:"message",label:"เปิดแจ้งเตือน",text:"เปิดแจ้งเตือน"}},
-        {type:"action",action:{type:"message",label:"ปิดแจ้งเตือน",text:"ปิดแจ้งเตือน"}}
-      ]));
+      await lineReply(env,event.replyToken,"ตั้งค่าแจ้งเตือนสถานะหุ้น\nพิมพ์ “เปิดแจ้งเตือน” หรือ “ปิดแจ้งเตือน” เพื่อเปลี่ยนการตั้งค่า");
     } else if(cmd.action==="alert_on"||cmd.action==="alert_off") {
       await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY, alerts_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
       const enabled=cmd.action==="alert_on"?1:0;
@@ -439,11 +428,8 @@ async function handleLineWebhook(request,env) {
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
         const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[],dailyMarket.stocks?.[symbol]?.bars||[]));
-        const quickItems=[];
-        if(page>1)quickItems.push({type:"action",action:{type:"message",label:"หน้า "+(page-1),text:"รายการหุ้น "+(page-1)}});
-        if(page<pageCount)quickItems.push({type:"action",action:{type:"message",label:"หน้าถัดไป",text:"รายการหุ้น "+(page+1)}});
-        quickItems.push({type:"action",action:{type:"message",label:"รีเฟรชราคา",text:"รายการหุ้น "+page}});
-        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount,quickItems.length?{items:quickItems}:null);
+        await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
+        if(pageCount>1)await lineReply(env,event.replyToken,"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”");
       } catch(e) {
         console.error("LINE_WATCHLIST_FLEX_ERROR",String(e));
         await lineReply(env,event.replyToken,"แสดงการ์ดหุ้นไม่สำเร็จ: "+String(e).slice(0,180));
