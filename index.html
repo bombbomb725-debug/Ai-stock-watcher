@@ -27,7 +27,7 @@
 
     <section class="panel watch-tools">
       <div class="watch-heading"><h2>จัดการหุ้นที่ติดตาม</h2><small id="watchlist">กำลังติดตาม 4 หุ้น</small></div>
-      <div class="search-row"><input id="stockSearch" type="search" placeholder="ค้นหาชื่อหุ้นหรือ Ticker เช่น NVDA, PLTR"><button id="addStock" type="button">ค้นหา</button></div>
+      <div class="search-row"><input id="stockSearch" type="search" placeholder="ค้นหาหุ้นสหรัฐฯ หรือไทย เช่น NVDA, PTT, ADVANC"><button id="addStock" type="button">ค้นหา</button></div>
       <div id="searchResults" class="search-results"></div>
       <h3>หุ้นตัวอย่าง</h3>
       <p>แตะเพื่อเพิ่มหุ้นเข้ารายการติดตาม</p>
@@ -40,9 +40,8 @@
       <small>คะแนนเป็นตัวกรองทางเทคนิคจากข้อมูลย้อนหลัง ไม่ใช่การรับประกันผลตอบแทนหรือคำแนะนำซื้อขาย</small>
     </section>
 
-    <section id="cards" class="cards" aria-live="polite">
-      <article class="stock-card loading">กำลังโหลดข้อมูล…</article>
-    </section>
+    <section class="market-section"><div class="market-title"><h2>หุ้นสหรัฐฯ</h2><small>Alpaca IEX · USD</small></div><section id="usCards" class="cards" aria-live="polite"><article class="stock-card loading">กำลังโหลดข้อมูลหุ้นสหรัฐฯ…</article></section></section>
+    <section class="market-section"><div class="market-title"><h2>หุ้นไทย</h2><small>SET / mai · THB</small></div><section id="thaiCards" class="cards" aria-live="polite"><article class="stock-card loading">กำลังโหลดข้อมูลหุ้นไทย…</article></section></section>
 
     <section class="settings panel">
       <div><h2>เชื่อมต่อข้อมูลตลาด</h2><p>ใส่ URL ของ Cloudflare Worker ที่คุณ deploy แล้ว</p></div>
@@ -61,6 +60,6 @@
     </section>
   </main>
   <footer>ข้อมูลเพื่อการศึกษา · ตรวจสอบราคากับโบรกเกอร์ก่อนตัดสินใจ</footer>
-  <script src="./app.js?v=20261118usrestore1" defer></script>
+  <script src="./app.js?v=20261118separatedmarkets1" defer></script>
 </body>
 </html>
