@@ -63,16 +63,24 @@ async function lineIdTokenProfile(idToken,env) {
   return data;
 }
 async function createOrUpdateUser(env,lineUserId,profile={}) {
-  const id="line:"+lineUserId;
-  const existing=await env.DB.prepare("SELECT id FROM users WHERE line_user_id=?").bind(lineUserId).first();
-  await env.DB.prepare(`INSERT INTO users(id,line_user_id,display_name)
-    VALUES(?,?,?)
-    ON CONFLICT(line_user_id) DO UPDATE SET display_name=COALESCE(excluded.display_name,users.display_name)`)
-    .bind(id,lineUserId,profile.name||null).run();
-  if(!existing) {
-    for(const symbol of DEFAULT_SYMBOLS) await env.DB.prepare("INSERT OR IGNORE INTO watchlist(user_id,symbol) VALUES(?,?)").bind(id,symbol).run();
+  // Legacy D1 databases use an INTEGER AUTOINCREMENT users.id.
+  // Let SQLite allocate the primary key instead of forcing a text ID.
+  let user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
+  if(user) {
+    await env.DB.prepare("UPDATE users SET display_name=COALESCE(?,display_name) WHERE line_user_id=?")
+      .bind(profile.name||null,lineUserId).run();
+    user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
+    return user;
   }
-  return await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE id=?").bind(id).first();
+  await env.DB.prepare("INSERT INTO users(line_user_id,display_name) VALUES(?,?)")
+    .bind(lineUserId,profile.name||null).run();
+  user=await env.DB.prepare("SELECT id,line_user_id,display_name FROM users WHERE line_user_id=?").bind(lineUserId).first();
+  if(!user)throw new Error("สร้างข้อมูลผู้ใช้ใน D1 ไม่สำเร็จ");
+  for(const symbol of DEFAULT_SYMBOLS) {
+    await env.DB.prepare("INSERT OR IGNORE INTO watchlist(user_id,symbol) VALUES(?,?)")
+      .bind(user.id,symbol).run();
+  }
+  return user;
 }
 async function getWatchlist(env,userId) {
   const r=await env.DB.prepare("SELECT symbol,added_at FROM watchlist WHERE user_id=? ORDER BY added_at,symbol").bind(userId).all();
