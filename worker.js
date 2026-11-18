@@ -153,10 +153,15 @@ async function fetchMarket(env,symbols,timeframe="1Day") {
   u.searchParams.set("symbols",symbols.join(","));u.searchParams.set("timeframe",timeframe);
   u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());
   u.searchParams.set("limit","1000");u.searchParams.set("feed","iex");u.searchParams.set("sort","asc");u.searchParams.set("adjustment","raw");
-  const [br,...tr]=await Promise.all([fetch(u,{headers:auth}),...symbols.map(s=>fetch(base+"/stocks/"+encodeURIComponent(s)+"/trades/latest?feed=iex",{headers:auth}))]);
+  const tu=new URL(base+"/stocks/trades/latest");
+  tu.searchParams.set("symbols",symbols.join(","));
+  tu.searchParams.set("feed","iex");
+  const [br,tr]=await Promise.all([fetch(u,{headers:auth}),fetch(tu,{headers:auth})]);
   if(!br.ok)throw new Error("Alpaca bars "+br.status+": "+(await br.text()).slice(0,250));
-  const bd=await br.json(),stocks={};
-  for(let i=0;i<symbols.length;i++){let trade=null;if(tr[i].ok){const d=await tr[i].json();trade=d.trade||null;}stocks[symbols[i]]={bars:bd.bars?.[symbols[i]]||[],trade};}
+  if(!tr.ok)throw new Error("Alpaca latest trades "+tr.status+": "+(await tr.text()).slice(0,250));
+  const [bd,td]=await Promise.all([br.json(),tr.json()]);
+  const stocks={};
+  for(const symbol of symbols)stocks[symbol]={bars:bd.bars?.[symbol]||[],trade:td.trades?.[symbol]||null};
   return {feed:"Alpaca IEX",timeframe,fetchedAt:new Date().toISOString(),stocks};
 }
 function ema(values,p) {
@@ -191,16 +196,28 @@ function analyzeStatus(bars,price) {
 async function scanAlerts(env) {
   if(!dbReady(env)||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
   const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol FROM watchlist w JOIN users u ON u.id=w.user_id ORDER BY u.id,w.symbol").all();
-  const watch=(rows.results||[]);
-  const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])],market={};
+  const watch=rows.results||[];
+  const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
+  const market={};
+  // Alpaca batch endpoints: at most 50 symbols per request, avoiding one request per ticker.
   for(let i=0;i<symbols.length;i+=50) {
-    try { const d=await fetchMarket(env,symbols.slice(i,i+50));Object.assign(market,d.stocks); }
-    catch(e){console.error("ALERT_SCAN_MARKET_ERROR",String(e));return;}
+    try {
+      const batch=await fetchMarket(env,symbols.slice(i,i+50));
+      Object.assign(market,batch.stocks);
+    } catch(e) {
+      console.error("ALERT_SCAN_MARKET_ERROR",String(e));
+      return;
+    }
   }
   const checked=new Date().toISOString();
-  // Refresh the shared, transparent technical screener universe once per scheduled scan.
-  for(const symbol of [...new Set(SCREENER_SYMBOLS)]) {
-    const data=market[symbol];if(!data)continue;
+  // Refresh Screener results every 15 minutes; personal watchlists are still checked each minute.
+  const ideaRows=await env.DB.prepare("SELECT symbol,scanned_at FROM stock_ideas").all();
+  const ideaBySymbol=new Map((ideaRows.results||[]).map(x=>[x.symbol,x.scanned_at]));
+  for(const symbol of SCREENER_SYMBOLS) {
+    const last=ideaBySymbol.get(symbol);
+    if(last && Date.now()-Date.parse(last)<15*60*1000)continue;
+    const data=market[symbol];
+    if(!data)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
     await env.DB.prepare(`INSERT INTO stock_ideas(symbol,score,status,rationale,scanned_at)
       VALUES(?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET score=excluded.score,status=excluded.status,
@@ -208,27 +225,36 @@ async function scanAlerts(env) {
       .bind(symbol,signal.score,signal.status,signal.label,checked).run();
   }
   if(!watch.length)return;
+  // Read all saved states once instead of issuing one SELECT for every user/ticker pair.
+  const stateRows=await env.DB.prepare("SELECT user_id,symbol,status FROM user_stock_state").all();
+  const stateByKey=new Map((stateRows.results||[]).map(x=>[x.user_id+"|"+x.symbol,x.status]));
   for(const item of watch) {
-    const data=market[item.symbol];if(!data)continue;
+    const data=market[item.symbol];
+    if(!data)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
-    const price=Number(data.trade?.p),old=await env.DB.prepare("SELECT status FROM user_stock_state WHERE user_id=? AND symbol=?").bind(item.user_id,item.symbol).first();
-    if(!old) {
-      await env.DB.prepare("INSERT OR IGNORE INTO user_stock_state(user_id,symbol,status,status_label,score,last_price,checked_at) VALUES(?,?,?,?,?,?,?)").bind(item.user_id,item.symbol,signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked).run();
+    const price=Number(data.trade?.p);
+    const key=item.user_id+"|"+item.symbol;
+    const oldStatus=stateByKey.get(key);
+    if(oldStatus===undefined) {
+      await env.DB.prepare("INSERT OR IGNORE INTO user_stock_state(user_id,symbol,status,status_label,score,last_price,checked_at) VALUES(?,?,?,?,?,?,?)")
+        .bind(item.user_id,item.symbol,signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked).run();
+      stateByKey.set(key,signal.status);
       continue;
     }
-    if(old.status===signal.status) {
-      await env.DB.prepare("UPDATE user_stock_state SET status_label=?,score=?,last_price=?,checked_at=? WHERE user_id=? AND symbol=?").bind(signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol).run();
-      continue;
-    }
-    const upd=await env.DB.prepare("UPDATE user_stock_state SET status=?,status_label=?,score=?,last_price=?,checked_at=? WHERE user_id=? AND symbol=? AND status=?").bind(signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol,old.status).run();
+    if(oldStatus===signal.status)continue;
+    const upd=await env.DB.prepare("UPDATE user_stock_state SET status=?,status_label=?,score=?,last_price=?,checked_at=? WHERE user_id=? AND symbol=? AND status=?")
+      .bind(signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol,oldStatus).run();
     if((upd.meta?.changes||0)!==1)continue;
-    const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+old.status.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?"$"+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล Alpaca IEX · สแกน "+checked;
+    const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+oldStatus.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?"$"+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล Alpaca IEX · สแกน "+checked;
     try {
       await linePush(env,item.line_user_id,message);
-      await env.DB.prepare("INSERT INTO alert_events(user_id,symbol,old_status,new_status,message) VALUES(?,?,?,?,?)").bind(item.user_id,item.symbol,old.status,signal.status,message).run();
+      await env.DB.prepare("INSERT INTO alert_events(user_id,symbol,old_status,new_status,message) VALUES(?,?,?,?,?)")
+        .bind(item.user_id,item.symbol,oldStatus,signal.status,message).run();
+      stateByKey.set(key,signal.status);
     } catch(e) {
       console.error("LINE_PUSH_ERROR",item.symbol,String(e));
-      await env.DB.prepare("UPDATE user_stock_state SET status=? WHERE user_id=? AND symbol=? AND status=?").bind(old.status,item.user_id,item.symbol,signal.status).run();
+      await env.DB.prepare("UPDATE user_stock_state SET status=? WHERE user_id=? AND symbol=? AND status=?")
+        .bind(oldStatus,item.user_id,item.symbol,signal.status).run();
     }
   }
 }
@@ -288,7 +314,7 @@ export default {
     if(url.pathname==="/line/webhook")return request.method==="POST"?handleLineWebhook(request,env):json({error:"Method not allowed"},405);
     if(request.method==="OPTIONS")return origin&&!ALLOWED_ORIGINS.has(origin)?json({error:"Origin not allowed"},403,headers):new Response(null,{status:204,headers});
     if(origin&&!ALLOWED_ORIGINS.has(origin))return json({error:"Origin not allowed",origin},403,headers);
-    if(url.pathname==="/"&&request.method==="GET")return json({service:"AI Stock Watcher API",status:"ready",multiUser:true,d1:dbReady(env),maxWatchlist:MAX_WATCHLIST,feed:"Alpaca IEX",scheduledScan:"*/15 * * * *"},200,headers);
+    if(url.pathname==="/"&&request.method==="GET")return json({service:"AI Stock Watcher API",status:"ready",multiUser:true,d1:dbReady(env),maxWatchlist:MAX_WATCHLIST,feed:"Alpaca IEX",scheduledScan:"* * * * *"},200,headers);
     if(request.method!=="GET"&&request.method!=="POST")return json({error:"Method not allowed"},405,headers);
     try{return await apiHandler(request,env,url,headers);}catch(e){console.error("API_ERROR",String(e));return json({error:"Internal API error",detail:String(e).slice(0,250)},500,headers);}
   },
