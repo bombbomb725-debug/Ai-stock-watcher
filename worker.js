@@ -243,10 +243,10 @@ function stockChartImageUrl(bars) {
   const url="https://quickchart.io/chart?width=600&height=220&format=png&c="+encodeURIComponent(JSON.stringify(config));
   return url.length<=2000?url:null;
 }
-function stockEntryPlan(bars) {
+function stockEntryPlan(bars,timezone="America/New_York") {
   const last=bars[bars.length-1];
-  const nyDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
-  const done=last?.t&&nyDate(new Date(last.t))===nyDate(new Date())?bars.slice(0,-1):bars;
+  const localDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+  const done=last?.t&&localDate(new Date(last.t))===localDate(new Date())?bars.slice(0,-1):bars;
   const closes=done.map(b=>Number(b.c)).filter(Number.isFinite);
   if(closes.length<20)return null;
   const e20=ema(closes,20);
@@ -277,15 +277,16 @@ function thaiStockFlexBubble(symbol) {
   ]},footer:{type:"box",layout:"vertical",paddingAll:"12px",contents:[{type:"button",style:"primary",color:"#2877C7",action:{type:"uri",label:"เปิดกราฟ",uri:url}}]}};
 }
 function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
+  const thai=isThaiSymbol(symbol),currency=thai?"฿":"$";
   const price=Number(trade?.p);
-  const priceText=Number.isFinite(price)?"$"+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
+  const priceText=Number.isFinite(price)?currency+price.toFixed(2):"ยังไม่มีราคาล่าสุด";
   const status=state?.status_label||"กำลังรอผลวิเคราะห์";
   const score=Number.isFinite(Number(state?.score))?Number(state.score)+"/5":"—";
   const checked=state?.checked_at?new Date(state.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอรอบสแกน";
   const tone=state?.status==="buy"?"#16A36A":state?.status==="risk"?"#D94B59":"#D69B28";
   const chartUrl=stockChartImageUrl(bars);
-  const plan=stockEntryPlan(dailyBars);
-  const money=n=>"$"+Number(n).toFixed(2);
+  const plan=stockEntryPlan(dailyBars,thai?"Asia/Bangkok":"America/New_York");
+  const money=n=>currency+Number(n).toFixed(2);
   const contents=[];
   if(chartUrl)contents.push({type:"image",url:chartUrl,size:"full",aspectRatio:"20:7",aspectMode:"fit"});
   contents.push(
@@ -321,7 +322,7 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
     type:"bubble",size:"kilo",
     header:{type:"box",layout:"horizontal",contents:[
       {type:"text",text:symbol,weight:"bold",size:"xl",color:"#FFFFFF",flex:1},
-      {type:"text",text:"US STOCK",size:"xs",color:"#A9B8CC",align:"end",gravity:"center"}
+      {type:"text",text:thai?"THAI STOCK":"US STOCK",size:"xs",color:"#A9B8CC",align:"end",gravity:"center"}
     ],backgroundColor:"#132238",paddingAll:"16px"},
     body:{type:"box",layout:"vertical",spacing:"md",contents,backgroundColor:"#0D1828",paddingAll:"16px"},
     footer:{type:"box",layout:"vertical",contents:[
@@ -435,15 +436,14 @@ async function handleLineWebhook(request,env) {
       const perPage=10,pageCount=Math.max(1,Math.ceil(symbols.length/perPage));
       const page=Math.min(cmd.page||1,pageCount),pageSymbols=symbols.slice((page-1)*perPage,page*perPage);
       try {
-        const usSymbols=pageSymbols.filter(symbol=>!isThaiSymbol(symbol));
         const [market,dailyMarket,states]=await Promise.all([
-          usSymbols.length?fetchMarket(env,usSymbols,"5Min"):Promise.resolve({stocks:{}}),
-          usSymbols.length?fetchMarket(env,usSymbols,"1Day"):Promise.resolve({stocks:{}}),
+          fetchMarket(env,pageSymbols,"5Min"),
+          fetchMarket(env,pageSymbols,"1Day"),
           env.DB.prepare("SELECT symbol,status,status_label,score,last_price,checked_at FROM user_stock_state WHERE user_id=? AND symbol IN ("+pageSymbols.map(()=>"?").join(",")+")").bind(user.id,...pageSymbols).all()
         ]);
         const bySymbol=new Map((states.results||[]).map(x=>[x.symbol,x]));
         const dashboard="https://bombbomb725-debug.github.io/Ai-stock-watcher/";
-        const bubbles=pageSymbols.map(symbol=>isThaiSymbol(symbol)?thaiStockFlexBubble(symbol):stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[],dailyMarket.stocks?.[symbol]?.bars||[]));
+        const bubbles=pageSymbols.map(symbol=>stockFlexBubble(symbol,market.stocks?.[symbol]?.trade,bySymbol.get(symbol),dashboard,market.stocks?.[symbol]?.bars||[],dailyMarket.stocks?.[symbol]?.bars||[]));
         await lineReplyFlex(env,event.replyToken,{type:"carousel",contents:bubbles},"Watchlist "+symbols.length+"/50 · หน้า "+page+"/"+pageCount);
         if(pageCount>1)await lineReply(env,event.replyToken,"ดูหน้าถัดไปพิมพ์ “รายการหุ้น "+Math.min(page+1,pageCount)+"” · รีเฟรชพิมพ์ “รายการหุ้น "+page+"”");
       } catch(e) {
@@ -478,24 +478,37 @@ async function fetchLatestTrades(env,symbols) {
   const data=await r.json();
   return data.trades||{};
 }
+async function fetchYahooThai(symbol,timeframe="1Day") {
+  const interval=timeframe==="5Min"?"5m":timeframe==="4Hour"?"60m":"1d",range=timeframe==="5Min"?"5d":timeframe==="4Hour"?"3mo":"1y",ttl=timeframe==="5Min"?30:300;
+  let payload=null,lastError=null;
+  for(const host of ["query1.finance.yahoo.com","query2.finance.yahoo.com"])try{
+    const url="https://"+host+"/v8/finance/chart/"+encodeURIComponent(symbol)+"?range="+range+"&interval="+interval+"&events=div%2Csplits";
+    const r=await fetch(url,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0 (compatible; AIStockWatcher/1.0)"},cf:{cacheTtl:ttl,cacheEverything:true}});
+    if(!r.ok)throw new Error("Yahoo HTTP "+r.status);
+    payload=await r.json();if(payload?.chart?.error)throw new Error(payload.chart.error.description||"Yahoo chart error");break;
+  }catch(e){lastError=e;}
+  if(!payload)throw new Error("Yahoo Finance unavailable for "+symbol+": "+String(lastError||"no response"));
+  const result=payload.chart?.result?.[0];if(!result)throw new Error("Yahoo returned no price history for "+symbol);
+  const q=result.indicators?.quote?.[0]||{},ts=result.timestamp||[],bars=[];
+  for(let i=0;i<ts.length;i++){const o=q.open?.[i],h=q.high?.[i],l=q.low?.[i],c=q.close?.[i],v=q.volume?.[i];if([o,h,l,c].every(x=>x!==null&&x!==undefined&&Number.isFinite(Number(x))))bars.push({t:new Date(ts[i]*1000).toISOString(),o:Number(o),h:Number(h),l:Number(l),c:Number(c),v:Number(v||0)});}
+  const meta=result.meta||{},last=bars[bars.length-1],mp=Number(meta.regularMarketPrice),price=Number.isFinite(mp)?mp:Number(last?.c),mt=Number(meta.regularMarketTime);
+  return {bars,trade:Number.isFinite(price)?{p:price,t:Number.isFinite(mt)&&mt>0?new Date(mt*1000).toISOString():last?.t||new Date().toISOString(),s:"YAHOO"}:null,currency:meta.currency||"THB",exchange:meta.fullExchangeName||meta.exchangeName||"SET"};
+}
 async function fetchMarket(env,symbols,timeframe="1Day") {
-  if(!env.ALPACA_KEY||!env.ALPACA_SECRET)throw new Error("Worker secrets ALPACA_KEY / ALPACA_SECRET missing");
-  const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};
-  const base="https://data.alpaca.markets/v2",end=new Date(),lookbackDays=timeframe==="4Hour"?45:timeframe==="5Min"?3:140,start=new Date(end.getTime()-lookbackDays*86400000);
-  const u=new URL(base+"/stocks/bars");
-  u.searchParams.set("symbols",symbols.join(","));u.searchParams.set("timeframe",timeframe);
-  u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());
-  u.searchParams.set("limit","1000");u.searchParams.set("feed","iex");u.searchParams.set("sort","asc");u.searchParams.set("adjustment","raw");
-  const tu=new URL(base+"/stocks/trades/latest");
-  tu.searchParams.set("symbols",symbols.join(","));
-  tu.searchParams.set("feed","iex");
-  const [br,tr]=await Promise.all([fetch(u,{headers:auth}),fetch(tu,{headers:auth})]);
-  if(!br.ok)throw new Error("Alpaca bars "+br.status+": "+(await br.text()).slice(0,250));
-  if(!tr.ok)throw new Error("Alpaca latest trades "+tr.status+": "+(await tr.text()).slice(0,250));
-  const [bd,td]=await Promise.all([br.json(),tr.json()]);
-  const stocks={};
-  for(const symbol of symbols)stocks[symbol]={bars:bd.bars?.[symbol]||[],trade:td.trades?.[symbol]||null};
-  return {feed:"Alpaca IEX",timeframe,fetchedAt:new Date().toISOString(),stocks};
+  const thai=symbols.filter(isThaiSymbol),us=symbols.filter(x=>!isThaiSymbol(x)),stocks={};
+  if(us.length){
+    if(!env.ALPACA_KEY||!env.ALPACA_SECRET)throw new Error("Worker secrets ALPACA_KEY / ALPACA_SECRET missing");
+    const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET},base="https://data.alpaca.markets/v2",end=new Date(),days=timeframe==="4Hour"?45:timeframe==="5Min"?3:140,start=new Date(end.getTime()-days*86400000);
+    const u=new URL(base+"/stocks/bars");u.searchParams.set("symbols",us.join(","));u.searchParams.set("timeframe",timeframe);u.searchParams.set("start",start.toISOString());u.searchParams.set("end",end.toISOString());u.searchParams.set("limit","1000");u.searchParams.set("feed","iex");u.searchParams.set("sort","asc");u.searchParams.set("adjustment","raw");
+    const tu=new URL(base+"/stocks/trades/latest");tu.searchParams.set("symbols",us.join(","));tu.searchParams.set("feed","iex");
+    const [br,tr]=await Promise.all([fetch(u,{headers:auth}),fetch(tu,{headers:auth})]);
+    if(!br.ok)throw new Error("Alpaca bars "+br.status+": "+(await br.text()).slice(0,250));if(!tr.ok)throw new Error("Alpaca latest trades "+tr.status+": "+(await tr.text()).slice(0,250));
+    const [bd,td]=await Promise.all([br.json(),tr.json()]);
+    for(const symbol of us)stocks[symbol]={bars:bd.bars?.[symbol]||[],trade:td.trades?.[symbol]||null,currency:"USD",exchange:"US"};
+  }
+  const thaiResults=await Promise.all(thai.map(async symbol=>[symbol,await fetchYahooThai(symbol,timeframe)]));
+  for(const [symbol,data] of thaiResults)stocks[symbol]=data;
+  return {feed:us.length&&thai.length?"Alpaca IEX + Yahoo Finance (unofficial)":thai.length?"Yahoo Finance (unofficial)":"Alpaca IEX",timeframe,fetchedAt:new Date().toISOString(),stocks};
 }
 function ema(values,p) {
   if(values.length<p)return null;const k=2/(p+1);let v=values.slice(0,p).reduce((a,b)=>a+b,0)/p;
@@ -538,11 +551,10 @@ function adxValue(bars,period=14) {
   for(let i=period;i<dx.length;i++)value=(value*(period-1)+dx[i])/period;
   return value;
 }
-function analyzeStatus(bars,price) {
-  // Keep this logic identical to app.js analyze(..., "1Day").
+function analyzeStatus(bars,price,timezone="America/New_York") {
   const last=bars[bars.length-1];
-  const nyDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
-  const done=last?.t&&nyDate(new Date(last.t))===nyDate(new Date())?bars.slice(0,-1):bars;
+  const localDate=d=>new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+  const done=last?.t&&localDate(new Date(last.t))===localDate(new Date())?bars.slice(0,-1):bars;
   const closes=done.map(b=>Number(b.c)).filter(Number.isFinite);
   if(closes.length<55)return {status:"wait",label:"ข้อมูลย้อนหลังไม่พอ",score:0};
   const short=ema(closes,20),long=ema(closes,50),momentum=rsi(closes),e20s=emaSeries(closes,20),e50s=emaSeries(closes,50);
@@ -573,7 +585,7 @@ async function scanAlerts(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY, alerts_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
   const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol,COALESCE(p.alerts_enabled,1) AS alerts_enabled FROM watchlist w JOIN users u ON u.id=w.user_id LEFT JOIN user_preferences p ON p.user_id=u.id ORDER BY u.id,w.symbol").all();
   const watch=rows.results||[];
-  const symbols=[...new Set([...watch.map(x=>x.symbol).filter(x=>!isThaiSymbol(x)),...SCREENER_SYMBOLS])];
+  const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
   const market={};
   // Alpaca batch endpoints: at most 50 symbols per request, avoiding one request per ticker.
   for(let i=0;i<symbols.length;i+=50) {
@@ -590,7 +602,7 @@ async function scanAlerts(env) {
   if(new Date().getUTCMinutes()%15===0) for(const symbol of SCREENER_SYMBOLS) {
     const data=market[symbol];
     if(!data)continue;
-    const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
+    const signal=analyzeStatus(data.bars||[],Number(data.trade?.p),isThaiSymbol(symbol)?"Asia/Bangkok":"America/New_York");
     await env.DB.prepare(`INSERT INTO stock_ideas(symbol,score,status,rationale)
       VALUES(?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET score=excluded.score,status=excluded.status,
       rationale=excluded.rationale`)
@@ -601,10 +613,9 @@ async function scanAlerts(env) {
   const stateRows=await env.DB.prepare("SELECT user_id,symbol,status FROM user_stock_state").all();
   const stateByKey=new Map((stateRows.results||[]).map(x=>[x.user_id+"|"+x.symbol,x.status]));
   for(const item of watch) {
-    if(isThaiSymbol(item.symbol))continue;
     const data=market[item.symbol];
     if(!data)continue;
-    const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
+    const signal=analyzeStatus(data.bars||[],Number(data.trade?.p),isThaiSymbol(item.symbol)?"Asia/Bangkok":"America/New_York");
     const price=Number(data.trade?.p);
     const key=item.user_id+"|"+item.symbol;
     const oldStatus=stateByKey.get(key);
@@ -625,7 +636,8 @@ async function scanAlerts(env) {
     if((upd.meta?.changes||0)!==1)continue;
     stateByKey.set(key,signal.status);
     if(Number(item.alerts_enabled)===0)continue;
-    const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+oldStatus.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?"$"+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล Alpaca IEX · สแกน "+checked;
+    const currency=isThaiSymbol(item.symbol)?"฿":"$";
+    const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+oldStatus.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?currency+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล "+(isThaiSymbol(item.symbol)?"Yahoo Finance (ไม่เป็นทางการ)":"Alpaca IEX")+" · สแกน "+checked;
     try {
       await linePush(env,item.line_user_id,message);
       await env.DB.prepare("INSERT INTO alert_events(user_id,symbol,status,old_status,new_status,message) VALUES(?,?,?,?,?,?)")
