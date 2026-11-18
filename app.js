@@ -558,5 +558,7 @@ setInterval(refreshLiveQuotes,15000);
 setInterval(updateMarketStatus,30000);
 updateMarketStatus();
 setInterval(refreshIntradayBars,60000);
-setInterval(syncSharedWatchlist,10000);
+setInterval(syncSharedWatchlist,3000);
+window.addEventListener("focus",()=>syncSharedWatchlist());
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)syncSharedWatchlist();});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshLiveQuotes();});
