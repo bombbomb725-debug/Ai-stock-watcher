@@ -83,7 +83,7 @@ async function createOrUpdateUser(env,lineUserId,profile={}) {
   return user;
 }
 async function getWatchlist(env,userId) {
-  const r=await env.DB.prepare("SELECT symbol,added_at FROM watchlist WHERE user_id=? ORDER BY added_at,symbol").bind(userId).all();
+  const r=await env.DB.prepare("SELECT symbol,COALESCE(added_at,created_at) AS added_at FROM watchlist WHERE user_id=? ORDER BY COALESCE(added_at,created_at),symbol").bind(userId).all();
   return (r.results||[]).map(x=>x.symbol);
 }
 async function addWatch(env,userId,symbol) {
@@ -245,14 +245,14 @@ async function scanAlerts(env) {
       continue;
     }
     if(oldStatus===signal.status)continue;
-    const upd=await env.DB.prepare("UPDATE user_stock_state SET status=?,status_label=?,score=?,last_price=?,checked_at=? WHERE user_id=? AND symbol=? AND status=?")
-      .bind(signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol,oldStatus).run();
+    const upd=await env.DB.prepare("UPDATE user_stock_state SET status=?,last_status=?,status_label=?,score=?,last_price=?,checked_at=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND symbol=? AND status=?")
+      .bind(signal.status,signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol,oldStatus).run();
     if((upd.meta?.changes||0)!==1)continue;
     const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+oldStatus.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?"$"+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล Alpaca IEX · สแกน "+checked;
     try {
       await linePush(env,item.line_user_id,message);
-      await env.DB.prepare("INSERT INTO alert_events(user_id,symbol,old_status,new_status,message) VALUES(?,?,?,?,?)")
-        .bind(item.user_id,item.symbol,oldStatus,signal.status,message).run();
+      await env.DB.prepare("INSERT INTO alert_events(user_id,symbol,status,old_status,new_status,message) VALUES(?,?,?,?,?,?)")
+        .bind(item.user_id,item.symbol,signal.status,oldStatus,signal.status,message).run();
       stateByKey.set(key,signal.status);
     } catch(e) {
       console.error("LINE_PUSH_ERROR",item.symbol,String(e));
