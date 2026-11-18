@@ -209,19 +209,15 @@ async function scanAlerts(env) {
     }
   }
   const checked=new Date().toISOString();
-  // Refresh Screener results every 15 minutes; personal watchlists are still checked each minute.
-  const ideaRows=await env.DB.prepare("SELECT symbol,scanned_at FROM stock_ideas").all();
-  const ideaBySymbol=new Map((ideaRows.results||[]).map(x=>[x.symbol,x.scanned_at]));
+  // Refresh Screener results on each scheduled scan. Legacy D1 schemas may not have scanned_at.
   for(const symbol of SCREENER_SYMBOLS) {
-    const last=ideaBySymbol.get(symbol);
-    if(last && Date.now()-Date.parse(last)<15*60*1000)continue;
     const data=market[symbol];
     if(!data)continue;
     const signal=analyzeStatus(data.bars||[],Number(data.trade?.p));
-    await env.DB.prepare(`INSERT INTO stock_ideas(symbol,score,status,rationale,scanned_at)
-      VALUES(?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET score=excluded.score,status=excluded.status,
-      rationale=excluded.rationale,scanned_at=excluded.scanned_at`)
-      .bind(symbol,signal.score,signal.status,signal.label,checked).run();
+    await env.DB.prepare(`INSERT INTO stock_ideas(symbol,score,status,rationale)
+      VALUES(?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET score=excluded.score,status=excluded.status,
+      rationale=excluded.rationale`)
+      .bind(symbol,signal.score,signal.status,signal.label).run();
   }
   if(!watch.length)return;
   // Read all saved states once instead of issuing one SELECT for every user/ticker pair.
@@ -270,7 +266,7 @@ async function apiHandler(request,env,url,headers) {
   }
   if(url.pathname==="/api/ideas"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
-    const rows=await env.DB.prepare("SELECT symbol,company_name,score,status,rationale,scanned_at FROM stock_ideas ORDER BY score DESC,symbol LIMIT 50").all();
+    const rows=await env.DB.prepare("SELECT symbol,score,status,rationale FROM stock_ideas ORDER BY score DESC,symbol LIMIT 50").all();
     return json({ideas:rows.results||[]},200,headers);
   }
   if(url.pathname.startsWith("/api/")&&url.pathname!=="/api/market"&&url.pathname!=="/api/assets") {
