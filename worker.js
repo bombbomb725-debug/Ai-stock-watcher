@@ -129,7 +129,7 @@ async function lineReply(env,replyToken,text,quickReply=null) {
 }
 async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist",quickReply=null) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return false;
-  const message={type:"flex",altText,contents,quickReply:quickReply||lineMenuQuickReply()};
+  const message={type:"flex",altText,contents,quickReply:lineMenuQuickReply(quickReply?.items||[])};
   try {
     const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
     if(r.ok)return true;
@@ -452,7 +452,7 @@ function analyzeStatus(bars,price) {
 async function scanAlerts(env) {
   if(!dbReady(env)||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY, alerts_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
-  const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol FROM watchlist w JOIN users u ON u.id=w.user_id LEFT JOIN user_preferences p ON p.user_id=u.id WHERE COALESCE(p.alerts_enabled,1)=1 ORDER BY u.id,w.symbol").all();
+  const rows=await env.DB.prepare("SELECT u.id AS user_id,u.line_user_id,w.symbol,COALESCE(p.alerts_enabled,1) AS alerts_enabled FROM watchlist w JOIN users u ON u.id=w.user_id LEFT JOIN user_preferences p ON p.user_id=u.id ORDER BY u.id,w.symbol").all();
   const watch=rows.results||[];
   const symbols=[...new Set([...watch.map(x=>x.symbol),...SCREENER_SYMBOLS])];
   const market={};
@@ -503,6 +503,8 @@ async function scanAlerts(env) {
     const upd=await env.DB.prepare("UPDATE user_stock_state SET status=?,last_status=?,status_label=?,score=?,last_price=?,checked_at=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND symbol=? AND status=?")
       .bind(signal.status,signal.status,signal.label,signal.score,Number.isFinite(price)?price:null,checked,item.user_id,item.symbol,oldStatus).run();
     if((upd.meta?.changes||0)!==1)continue;
+    stateByKey.set(key,signal.status);
+    if(Number(item.alerts_enabled)===0)continue;
     const message="AI Stock Watcher · สถานะหุ้นเปลี่ยน\n"+item.symbol+" : "+oldStatus.toUpperCase()+" → "+signal.status.toUpperCase()+"\n"+signal.label+" · คะแนน "+signal.score+"/5\nราคา "+(Number.isFinite(price)?"$"+price.toFixed(2):"ไม่พบราคา")+"\nข้อมูล Alpaca IEX · สแกน "+checked;
     try {
       await linePush(env,item.line_user_id,message);
