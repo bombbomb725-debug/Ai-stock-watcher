@@ -582,7 +582,7 @@ async function fetchMarket(env,symbols,timeframe="1Day") {
       else stocks[symbol]={bars:[],trade:null,error:String(result.reason||"Yahoo Finance unavailable"),currency:"THB",exchange:"SET"};
     }
   }
-  return {feed:us.length&&thai.length?"Alpaca IEX + Yahoo Finance (unofficial)":thai.length?"Yahoo Finance (unofficial)":"Alpaca IEX",timeframe,fetchedAt:new Date().toISOString(),stocks};
+  return {feed:us.length&&thai.length?"Alpaca IEX + DataCedar (Yahoo fallback)":thai.length?"DataCedar (Yahoo fallback)":"Alpaca IEX",timeframe,fetchedAt:new Date().toISOString(),stocks};
 }
 function ema(values,p) {
   if(values.length<p)return null;const k=2/(p+1);let v=values.slice(0,p).reduce((a,b)=>a+b,0)/p;
