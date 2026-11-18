@@ -286,6 +286,7 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
   const tone=state?.status==="buy"?"#16A36A":state?.status==="risk"?"#D94B59":"#D69B28";
   const chartUrl=stockChartImageUrl(bars);
   const plan=stockEntryPlan(dailyBars,thai?"Asia/Bangkok":"America/New_York");
+  const detail=analyzeStatus(dailyBars,price,thai?"Asia/Bangkok":"America/New_York");
   const money=n=>currency+Number(n).toFixed(2);
   const contents=[];
   if(chartUrl)contents.push({type:"image",url:chartUrl,size:"full",aspectRatio:"20:7",aspectMode:"fit"});
@@ -299,7 +300,8 @@ function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[],dailyBars=[]) {
       {type:"text",text:"คะแนน AI",size:"sm",color:"#A9B8CC",flex:1},
       {type:"text",text:score,size:"sm",weight:"bold",color:"#FFFFFF",flex:4}
     ]},
-    {type:"text",text:"กราฟราคา 5 นาที · อัปเดตสัญญาณ: "+checked,size:"xs",color:"#8293A9",wrap:true}
+    {type:"text",text:"EMA20/50 "+(Number.isFinite(detail.ema20)?detail.ema20.toFixed(2):"—")+" / "+(Number.isFinite(detail.ema50)?detail.ema50.toFixed(2):"—")+" · RSI14 "+(Number.isFinite(detail.rsi)?detail.rsi.toFixed(1):"—")+" · MACD "+(Number.isFinite(detail.macd)?detail.macd.toFixed(3):"—")+" · ADX14 "+(Number.isFinite(detail.adx)?detail.adx.toFixed(1):"—"),size:"xs",color:"#A9B8CC",wrap:true},
+    {type:"text",text:"กราฟราคา 5 นาที · อัปเดตสัญญาณ: "+checked+" · "+(thai?"Yahoo Finance (ไม่เป็นทางการ)":"Alpaca IEX"),size:"xs",color:"#8293A9",wrap:true}
   );
   if(plan)contents.push(
     {type:"separator",margin:"md",color:"#314158"},
@@ -506,8 +508,14 @@ async function fetchMarket(env,symbols,timeframe="1Day") {
     const [bd,td]=await Promise.all([br.json(),tr.json()]);
     for(const symbol of us)stocks[symbol]={bars:bd.bars?.[symbol]||[],trade:td.trades?.[symbol]||null,currency:"USD",exchange:"US"};
   }
-  const thaiResults=await Promise.all(thai.map(async symbol=>[symbol,await fetchYahooThai(symbol,timeframe)]));
-  for(const [symbol,data] of thaiResults)stocks[symbol]=data;
+  for(let i=0;i<thai.length;i+=5) {
+    const batch=await Promise.allSettled(thai.slice(i,i+5).map(async symbol=>[symbol,await fetchYahooThai(symbol,timeframe)]));
+    for(let j=0;j<batch.length;j++) {
+      const symbol=thai[i+j],result=batch[j];
+      if(result.status==="fulfilled")stocks[result.value[0]]=result.value[1];
+      else stocks[symbol]={bars:[],trade:null,error:String(result.reason||"Yahoo Finance unavailable"),currency:"THB",exchange:"SET"};
+    }
+  }
   return {feed:us.length&&thai.length?"Alpaca IEX + Yahoo Finance (unofficial)":thai.length?"Yahoo Finance (unofficial)":"Alpaca IEX",timeframe,fetchedAt:new Date().toISOString(),stocks};
 }
 function ema(values,p) {
@@ -578,7 +586,7 @@ function analyzeStatus(bars,price,timezone="America/New_York") {
   else if(confirmed){status="buy";label="BUY SIGNAL · แนวโน้มและ ADX ยืนยัน";}
   else if(momentum<45||(!trend&&lastClose<short&&short<long)){status="risk";label="แนวโน้มยังอ่อน";}
   else if(lastClose>short&&!trend){status="wait";label="เริ่มฟื้นตัว · รอยืนยัน";}
-  return {status,label,score};
+  return {status,label,score,ema20:short,ema50:long,rsi:momentum,macd,adx};
 }
 async function scanAlerts(env) {
   if(!dbReady(env)||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
