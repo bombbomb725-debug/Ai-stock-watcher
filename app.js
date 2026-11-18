@@ -236,30 +236,19 @@ function showPairingCode(code) {
   $("#accountStatus").innerHTML='ยังไม่เชื่อม LINE · เปิดแชตบอต AI Stock Watcher แล้วพิมพ์ <b>เชื่อม '+escapeHtml(code)+'</b> · รหัสหมดอายุใน 10 นาที';
 }
 async function activateSharedAccount(data) {
-  const localSymbols=[...state.symbols];
+  // Once LINE is linked, the server-side D1 watchlist is the sole source of truth.
+  // Never merge browser localStorage into it: localStorage may contain symbols
+  // that the user deliberately removed from LINE on another device.
   state.user=data.user||null;
   state.shared=true;
-  state.symbols=data.symbols||[];
-  let mergeLimitReached=false;
-  for(const symbol of localSymbols) {
-    if(state.symbols.includes(symbol))continue;
-    if(state.symbols.length>=50){mergeLimitReached=true;break;}
-    try {
-      const added=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
-      if(added.ok)state.symbols=added.symbols;
-    } catch(e) {
-      if(e.message.includes("50")){mergeLimitReached=true;break;}
-      throw e;
-    }
-  }
   const current=await apiRequest("/api/me");
-  state.symbols=current.symbols||state.symbols;
+  state.symbols=Array.isArray(current.symbols)?current.symbols:(Array.isArray(data.symbols)?data.symbols:[]);
   state.user=current.user||state.user;
   saveSymbols();
   sessionStorage.removeItem("stockWatcherLinkCode");
   sessionStorage.removeItem("stockWatcherLinkExpiry");
   renderWatchlist();
-  $("#accountStatus").textContent="เชื่อม LINE แล้ว"+(state.user?.displayName?" · "+state.user.displayName:"")+" · ใช้ Watchlist ร่วมกัน"+(mergeLimitReached?" · รายการเต็ม 50 หุ้น จึงยังรวมบางตัวจากเว็บไม่ได้":"");
+  $("#accountStatus").textContent="เชื่อม LINE แล้ว"+(state.user?.displayName?" · "+state.user.displayName:"")+" · ใช้ Watchlist จากบัญชี LINE เป็นรายการหลัก";
   setStatus("บัญชี LINE เชื่อมแล้ว",true);
   loadMarket();
 }
