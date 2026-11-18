@@ -1,5 +1,4 @@
 const DEFAULT_SYMBOLS = ["ASTS", "RKLB", "IONQ", "OKLO"];
-const SCREENER_SYMBOLS = ["NVDA","AMD","TSLA","PLTR","SOFI","AVGO","HOOD","SMR","JOBY","ACHR","RKLB","ASTS","IONQ","OKLO","MSFT","AMZN","META","ARM","COIN","LUNR","RDDT","MSTR","TEM","RGTI","QBTS","QUBT","HIMS","CRSP","RXRX","SPCE","APP","ORCL","CRM","NOW","PANW","CRWD","NET","SNOW","MU","TSM","ANET","GEV","CEG","VST","CCJ","LEU","UUUU","QS","ENVX","BBAI"];
 const NAMES = {
   ASTS:"AST SpaceMobile",RKLB:"Rocket Lab",IONQ:"IonQ",OKLO:"Oklo",
   NVDA:"NVIDIA",AMD:"Advanced Micro Devices",TSLA:"Tesla",PLTR:"Palantir",
@@ -355,10 +354,6 @@ async function removeSymbol(symbol) {
     loadMarket();
   } catch(e) {setStatus("ลบหุ้นไม่สำเร็จ: "+e.message);}
 }
-function renderIdeas(){
-  const root=$("#ideas");
-  root.innerHTML=SCREENER_SYMBOLS.map(s=>'<button class="idea-chip" type="button" data-idea="'+s+'">'+s+' <small>เพิ่ม</small></button>').join("");
-}
 async function fetchMarket(symbols,timeframe=state.timeframe){
   const result={},groups=[symbols.filter(s=>!isThaiSymbol(s)),symbols.filter(isThaiSymbol)].filter(group=>group.length);
   const outcomes=await Promise.allSettled(groups.map(async group=>{
@@ -485,10 +480,9 @@ async function addSymbol(symbol){
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
   if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นแล้ว");return;}
   try {
-    if(state.shared) {
-      const data=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
-      state.symbols=data.symbols||state.symbols;
-    } else state.symbols.push(symbol);
+    if(!state.shared)throw new Error("กรุณาเชื่อมบัญชี LINE ก่อนเพิ่มหุ้น เพื่อให้ Watchlist บนเว็บและ LINE เป็นรายการเดียวกัน");
+    const data=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
+    state.symbols=data.symbols||state.symbols;
     saveSymbols();
     renderWatchlist();
     $("#searchResults").innerHTML="";$("#stockSearch").value="";
@@ -507,16 +501,18 @@ async function searchAssets(){
 }
 async function runScreener(){
   const btn=$("#runScreener"),root=$("#screenerResults");
-  btn.disabled=true;btn.textContent="กำลังคัดกรอง…";root.textContent="กำลังคัดกรองหุ้น "+SCREENER_SYMBOLS.length+" ตัว · กรอบเวลา "+(state.timeframe==="4Hour"?"4 ชั่วโมง":"รายวัน");
+  btn.disabled=true;btn.textContent="กำลังคัดกรอง…";
+  root.textContent="กำลังค้นหาหุ้นสหรัฐฯ ทุกอุตสาหกรรมจากหุ้นที่มีการซื้อขายคึกคักและหุ้นที่เป็น Market Movers แล้วคำนวณ EMA20/50, RSI14, MACD และวอลุ่ม…";
   try{
-    const symbols=[...new Set(SCREENER_SYMBOLS)];
-    const data=await fetchMarket(symbols);
-    const ranked=symbols.map(symbol=>{
-      const item=data[symbol];if(!item)return null;
-      const a=analyze(item.bars||[],Number(item.trade?.p));
-      return {symbol,item,a};
-    }).filter(Boolean).sort((x,y)=>y.a.score-x.a.score);
-    root.innerHTML=ranked.map((x,i)=>'<div class="rank-row"><b>#'+(i+1)+' '+x.symbol+'</b><span class="signal '+x.a.kind+'">'+x.a.signal+'</span><span>'+x.a.score+'/5</span><button type="button" data-screener-add="'+x.symbol+'">เพิ่มในรายการ</button></div>').join("")||"ไม่มีข้อมูลสำหรับคัดกรอง";
+    const data=await apiRequest("/api/screener");
+    const ranked=data.ideas||[];
+    const header='<div class="screener-summary">ตรวจพบ '+Number(data.candidateCount||0)+' หุ้น · มีข้อมูลย้อนหลังเพียงพอ '+Number(data.scannedCount||0)+' หุ้น · แสดงอันดับสูงสุด '+ranked.length+' หุ้น</div>';
+    const rows=ranked.map((x,i)=>{
+      const already=state.symbols.includes(x.symbol);
+      const label=x.status==="buy"?"แนวโน้มผ่านเงื่อนไข":x.status==="risk"?"แนวโน้มอ่อน":"รอการยืนยัน";
+      return '<div class="rank-row"><b>#'+(i+1)+' '+escapeHtml(x.symbol)+'</b><span class="signal '+(x.status==="buy"?"buy":x.status==="risk"?"risk":"wait")+'">'+label+'</span><span>'+Number(x.score||0)+'/5</span><button type="button" data-screener-add="'+escapeHtml(x.symbol)+'" '+(already?'disabled':'')+'>'+(already?'อยู่ในรายการแล้ว':'เพิ่มใน LINE + เว็บ')+'</button></div>';
+    }).join("");
+    root.innerHTML=header+(rows||'<div class="screener-empty">ยังไม่มีหุ้นที่มีข้อมูลย้อนหลังเพียงพอ ลองคัดกรองอีกครั้งในช่วงตลาดเปิด</div>');
   }catch(e){root.textContent="คัดกรองไม่สำเร็จ: "+e.message;}
   finally{btn.disabled=false;btn.textContent="คัดกรองอีกครั้ง";}
 }
@@ -532,7 +528,6 @@ $("#saveUrl").addEventListener("click",()=>{
 $("#addStock").addEventListener("click",searchAssets);
 $("#stockSearch").addEventListener("keydown",e=>{if(e.key==="Enter")searchAssets();});
 $("#searchResults").addEventListener("click",e=>{const b=e.target.closest("[data-symbol]");if(b)addSymbol(b.dataset.symbol);});
-$("#ideas").addEventListener("click",e=>{const b=e.target.closest("[data-idea]");if(b)addSymbol(b.dataset.idea);});
 $("#usCards").addEventListener("click",e=>{
   const b=e.target.closest("[data-remove]");if(!b)return;
   removeSymbol(b.dataset.remove);
@@ -545,7 +540,7 @@ $("#enableAlerts").addEventListener("click",async()=>{
   const permission=await Notification.requestPermission();
   setStatus(permission==="granted"?"เปิดการแจ้งเตือนแล้ว":"ยังไม่ได้อนุญาตการแจ้งเตือน",permission==="granted");
 });
-renderIdeas();renderWatchlist();initializeAccount();
+renderWatchlist();initializeAccount();
 
 
 /* Live price polling: Alpaca IEX latest trades every 15 seconds during US regular hours. */
