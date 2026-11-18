@@ -120,24 +120,34 @@ async function lineReply(env,replyToken,text) {
   if(!r.ok)console.error("LINE_REPLY_FAILED",r.status,(await r.text()).slice(0,250));
 }
 async function lineReplyFlex(env,replyToken,contents,altText="AI Stock Watcher · Watchlist",quickReply=null) {
-  if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
+  if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return false;
   const message={type:"flex",altText,contents};
   if(quickReply)message.quickReply=quickReply;
-  const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
-  if(!r.ok)console.error("LINE_FLEX_REPLY_FAILED",r.status,(await r.text()).slice(0,400));
+  try {
+    const r=await fetch("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{"Authorization":"Bearer "+env.LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},body:JSON.stringify({replyToken,messages:[message]})});
+    if(r.ok)return true;
+    const detail=(await r.text()).slice(0,300);
+    console.error("LINE_FLEX_REPLY_FAILED",r.status,detail);
+    await lineReply(env,replyToken,"ระบบแสดงการ์ดหุ้นไม่สำเร็จ ("+r.status+") กรุณาลองพิมพ์ “รายการหุ้น” อีกครั้ง");
+    return false;
+  } catch(e) {
+    console.error("LINE_FLEX_REPLY_ERROR",String(e));
+    await lineReply(env,replyToken,"ระบบแสดงการ์ดหุ้นขัดข้อง กรุณาลองพิมพ์ “รายการหุ้น” อีกครั้ง");
+    return false;
+  }
 }
 function stockChartImageUrl(bars) {
-  const rows=(bars||[]).slice(-60);
-  const values=rows.map(x=>Number(x.c));
-  if(values.filter(Number.isFinite).length<2)return null;
-  const e20=emaSeries(values,20),e50=emaSeries(values,50);
-  const labels=values.map((_,i)=>i+1);
-  const config={type:"line",data:{labels,datasets:[
-    {label:"ราคา",data:values,borderColor:"#55A7FF",borderWidth:3,pointRadius:0,fill:false,tension:0.18,spanGaps:true},
-    {label:"EMA20",data:e20,borderColor:"#F2B84B",borderWidth:2,pointRadius:0,fill:false,tension:0.12,spanGaps:true},
-    {label:"EMA50",data:e50,borderColor:"#B58BEB",borderWidth:2,pointRadius:0,fill:false,tension:0.12,spanGaps:true}
-  ]},options:{legend:{display:true,labels:{fontColor:"#DCE6F2",boxWidth:16}},layout:{padding:8},scales:{xAxes:[{display:false,gridLines:{display:false}}],yAxes:[{display:true,gridLines:{color:"rgba(160,180,210,.15)"},ticks:{fontColor:"#A9B8CC",maxTicksLimit:4}}]},plugins:{datalabels:{display:false}}}};
-  return "https://quickchart.io/chart?width=600&height=240&devicePixelRatio=2&backgroundColor=%230D1828&format=png&c="+encodeURIComponent(JSON.stringify(config));
+  const all=(bars||[]).map(x=>Number(x.c)).filter(Number.isFinite);
+  if(all.length<2)return null;
+  const e20=emaSeries(all,20),e50=emaSeries(all,50),n=Math.min(24,all.length);
+  const values=all.slice(-n),a20=e20.slice(-n),a50=e50.slice(-n);
+  const config={type:"line",data:{labels:values.map((_,i)=>i+1),datasets:[
+    {label:"Price",data:values,borderColor:"#55A7FF",borderWidth:2,pointRadius:0,fill:false},
+    {label:"EMA20",data:a20,borderColor:"#F2B84B",borderWidth:1,pointRadius:0,fill:false,spanGaps:true},
+    {label:"EMA50",data:a50,borderColor:"#B58BEB",borderWidth:1,pointRadius:0,fill:false,spanGaps:true}
+  ]},options:{legend:{display:false},scales:{xAxes:[{display:false}],yAxes:[{ticks:{maxTicksLimit:3}}]}}};
+  const url="https://quickchart.io/chart?width=600&height=220&format=png&c="+encodeURIComponent(JSON.stringify(config));
+  return url.length<=2000?url:null;
 }
 function stockFlexBubble(symbol,trade,state,dashboardUrl,bars=[]) {
   const price=Number(trade?.p);
