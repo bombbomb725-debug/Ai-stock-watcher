@@ -83,8 +83,14 @@ footer{text-align:center;color:#70839d;font-size:11px;padding:24px 0 34px}
 .decision p{margin:5px 0 0;font-size:12px;line-height:1.55;color:var(--text)}
 .decision.red{background:#321d27;border-color:#70404b}
 .decision.red .decision-heading b{color:#ff9aa2}
-.decision.yellow{background:#382f1c;border-color:#6a5528}
-.decision.yellow .decision-heading b{color:#ffdb86}
+.decision.orange{background:#382719;border-color:#a85d25}
+.decision.orange .decision-heading b{color:#ffad66}
+.decision-score{display:flex;align-items:baseline;gap:7px;margin-top:4px}
+.decision-score strong{font-size:32px;line-height:1.1;font-weight:850;letter-spacing:-1px}
+.decision-score span{font-size:11px;color:var(--muted)}
+.decision.green .decision-score strong{color:#69e6b5}
+.decision.red .decision-score strong{color:#ff9aa2}
+.decision.orange .decision-score strong{color:#ffad66}
 .decision.green{background:#12352e;border-color:#286b59}
 .decision.green .decision-heading b{color:#69e6b5}
 .decision-key{display:grid;gap:9px;margin:12px 0}
