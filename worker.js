@@ -447,7 +447,7 @@ async function handleLineWebhook(request,env) {
       const lines=(rows.results||[]).map((x,i)=>(i+1)+". "+x.symbol+" · "+x.score+"/5 · "+x.status+" — "+(x.rationale||"คะแนนทางเทคนิค")).join("\n");
       await lineReply(env,event.replyToken,"หุ้นที่ Screener จัดอันดับ (ไม่ใช่คำแนะนำการลงทุน)\n"+(lines||"ยังไม่มีผลคัดกรอง รอรอบสแกน"));
     } else {
-      await lineReply(env,event.replyToken,"เลือกเมนูด้านล่างได้เลยครับ\nดูหุ้น · เพิ่มหุ้น · ลบหุ้น · ราคาเข้าซื้อ · หุ้นน่าสนใจ · ตั้งค่าแจ้งเตือน\n\nยังพิมพ์ “เพิ่ม NVDA” หรือ “ลบ NVDA” ได้เช่นเดิม");
+      await lineReply(env,event.replyToken,"ไม่พบคำสั่งนี้ กรุณาตรวจสอบคำสั่งแล้วลองอีกครั้ง");
     }
   }
   return json({ok:true});
