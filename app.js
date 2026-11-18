@@ -165,6 +165,12 @@ function entryPlan(bars,a){
   const risk=Math.max(high-stop,atr*.5);
   return {low,high,stop,target:high+2*risk};
 }
+function isThaiSymbol(symbol){return /^[A-Z0-9]{1,8}\.BK$/.test(String(symbol||"").toUpperCase());}
+function renderThaiCard(symbol){
+  const ticker=symbol.replace(/\.BK$/i,""),tvSymbol=encodeURIComponent("SET:"+ticker);
+  const chartUrl="https://s.tradingview.com/widgetembed/?symbol="+tvSymbol+"&interval=D&hidesidetoolbar=1&symboledit=1&saveimage=0&toolbarbg=F1F3F6&studies=[]&theme=dark&style=1&timezone=Asia%2FBangkok&withdateranges=1&hideideas=1&locale=th";
+  return '<article class="stock-card thai-stock-card"><div class="stock-head"><div><div class="symbol">'+escapeHtml(ticker)+'</div><div class="company">หุ้นไทย · SET/mai</div></div><div class="card-actions"><span class="signal wait">กราฟเท่านั้น</span><button class="remove-stock" data-remove="'+escapeHtml(symbol)+'" aria-label="ลบ '+escapeHtml(ticker)+'">×</button></div></div><div class="decision yellow"><div class="decision-heading"><span>ข้อมูลที่มี</span><b>TradingView</b></div><p>แสดงกราฟเท่านั้น ยังไม่คำนวณสัญญาณหรือราคาเข้าซื้อ เพราะไม่มีข้อมูล OHLC ฟรีที่ยืนยันความถูกต้อง</p></div><div class="thai-chart-frame"><iframe loading="lazy" title="กราฟ '+escapeHtml(ticker)+'" src="'+chartUrl+'" referrerpolicy="no-referrer" allowtransparency="true"></iframe></div><div class="card-foot">ตลาดไทย · '+escapeHtml(ticker)+' · แหล่งกราฟ TradingView</div></article>';
+}
 function renderCard(symbol,item){
   const bars=item.bars||[],price=Number(item.trade?.p),a=analyze(bars,price);
   if(item.signal){
