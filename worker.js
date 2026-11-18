@@ -859,7 +859,7 @@ async function apiHandler(request,env,url,headers) {
     }
     ranked.sort((a,b)=>b.score-a.score||(a.status==="buy"?-1:0)-(b.status==="buy"?-1:0)||a.symbol.localeCompare(b.symbol));
     const qualified=ranked.filter(x=>x.score>=4);
-    return json({ideas:qualified.slice(0,50),candidateCount:candidates.length,scannedCount:ranked.length,qualifiedCount:qualified.length,minScore:4,fetchedAt:new Date().toISOString(),universe:"Alpaca US most-active stocks + top gainers/losers"},200,headers);
+    return json({ideas:ranked.slice(0,50),candidateCount:candidates.length,scannedCount:ranked.length,qualifiedCount:qualified.length,minScore:0,fetchedAt:new Date().toISOString(),universe:"Alpaca US most-active stocks + top gainers/losers"},200,headers);
   }
   if(url.pathname==="/api/ideas"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
@@ -874,7 +874,7 @@ async function apiHandler(request,env,url,headers) {
     if(url.pathname==="/api/watchlist/add"&&request.method==="POST") {
       const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol);
       if(!validSymbol(symbol))return json({error:"Ticker ไม่ถูกต้อง"},400,headers);
-      const result=await addWatch(env,user.id,symbol);return json(result,result.ok?200:409,headers);
+      const result=await addWatch(env,user.id,symbol);if(result.ok&&!result.already&&user.line_user_id){try{await linePush(env,user.line_user_id,"AI Stock Watcher · เพิ่มหุ้นจากเว็บไซต์สำเร็จ ✓\\n"+symbol+" ถูกบันทึกใน Watchlist LINE และเว็บแล้ว\\nรายการปัจจุบัน "+result.symbols.length+"/50");}catch(e){console.error("WEB_ADD_LINE_CONFIRMATION_FAILED",String(e));}}return json({...result,lineSynced:result.ok},result.ok?200:409,headers);
     }
     if(url.pathname==="/api/watchlist/remove"&&request.method==="POST") {
       const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol);
