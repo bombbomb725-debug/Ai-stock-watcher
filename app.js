@@ -395,7 +395,7 @@ async function refreshLiveQuotes(){
       const trade=data.trades?.[symbol];
       if(trade&&state.market[symbol])state.market[symbol].trade=trade;
     }
-    $("#cards").innerHTML=symbols.map(s=>state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>').join("");
+    $("#cards").innerHTML=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])].map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>')).join("");
     $("#updated").textContent="อัปเดตราคาสด "+new Date().toLocaleTimeString("th-TH")+" · Alpaca IEX · รีเฟรชทุก 15 วินาทีขณะตลาดเปิด";
     setStatus("ตลาดสหรัฐฯ เปิด · อัปเดตราคาสดอัตโนมัติ",true);
   }catch(e){console.warn("LIVE_QUOTE_REFRESH_FAILED",e);}
