@@ -142,17 +142,17 @@ function atrValue(bars,period=14){
   }
   return tr.length>=period?tr.slice(-period).reduce((a,b)=>a+b,0)/period:null;
 }
-function chartSvg(bars,livePrice){
-  const rows=bars.slice(-60),history=rows.map(b=>Number(b.c)),hasLive=Number.isFinite(livePrice);
+function chartSvg(bars,livePrice,caption="กราฟย้อนหลัง · รายวัน"){
+  const rows=bars.slice(-60),history=rows.map(b=>Number(b.c)).filter(Number.isFinite),hasLive=Number.isFinite(livePrice);
   const cl=hasLive?[...history,livePrice]:history,e20=emaSeries(history,20),e50=emaSeries(history,50);
   if(hasLive){e20.push(e20.at(-1)??null);e50.push(e50.at(-1)??null);}
   const vals=[...cl,...e20.filter(Number.isFinite),...e50.filter(Number.isFinite)];
-  if(vals.length<2)return '<div class="chart-empty">ข้อมูลกราฟยังไม่เพียงพอ</div>';
+  if(vals.length<2)return '<div class="chart-empty">ข้อมูลกราฟยังไม่เพียงพอ · มี '+history.length+' แท่ง</div>';
   let lo=Math.min(...vals),hi=Math.max(...vals),pad=(hi-lo)*.12||1;lo-=pad;hi+=pad;
-  const X=i=>30+i*(560/Math.max(1,rows.length-1)),Y=v=>12+(hi-v)/(hi-lo)*156;
+  const X=i=>30+i*(560/Math.max(1,cl.length-1)),Y=v=>12+(hi-v)/(hi-lo)*156;
   const path=a=>a.map((v,i)=>Number.isFinite(v)?(i&&Number.isFinite(a[i-1])?"L":"M")+X(i).toFixed(1)+","+Y(v).toFixed(1):"").join(" ");
   const last=cl.length-1;
-  return '<div class="chart-wrap"><div class="chart-caption">กราฟระหว่างวัน · แท่ง 5 นาที · จุดปลายกราฟคือราคาซื้อขายล่าสุด</div><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคาปิด</span><span>EMA20</span><span>EMA50</span></div></div>';
+  return '<div class="chart-wrap"><div class="chart-caption">'+caption+' · EMA20 / EMA50</div><svg class="price-chart" viewBox="0 0 610 190" role="img" aria-label="กราฟราคา EMA20 EMA50"><line x1="30" y1="45" x2="590" y2="45" class="chart-grid"/><line x1="30" y1="95" x2="590" y2="95" class="chart-grid"/><line x1="30" y1="145" x2="590" y2="145" class="chart-grid"/><path d="'+path(cl)+'" class="line-price"/><path d="'+path(e20)+'" class="line-ema20"/><path d="'+path(e50)+'" class="line-ema50"/><circle cx="'+X(last)+'" cy="'+Y(cl[last])+'" r="3.5" class="chart-last"/></svg><div class="chart-legend"><span>ราคา</span><span>EMA20</span><span>EMA50</span></div></div>';
 }
 function entryPlan(bars,a){
   const done=completedBars(bars,state.timeframe),atr=atrValue(done),e20=a.short;
@@ -192,7 +192,7 @@ function renderCard(symbol,item){
   const decisionHtml='<section class="decision '+decision.tone+'"><div class="decision-heading"><span>สรุปง่ายๆ</span><b>'+decision.label+'</b></div><p>'+decision.detail+'</p></section>';
   const planHtml=plan?`<section class="entry-plan"><div class="entry-title">โซนราคาเฝ้ารอเข้าซื้อเมื่อกลับตัวเป็นขาขึ้น</div><div class="entry-range">$${fmt(plan.low)} – $${fmt(plan.high)}</div><div class="entry-levels"><span>เป้าหมาย 2R <b>$${fmt(plan.target)}</b></span><span>จุดตัดขาดทุน <b>$${fmt(plan.stop)}</b></span></div><small>${a.confirmed?'แนวโน้มผ่านเงื่อนไขแล้ว รอราคาเข้ามาในโซนนี้ ไม่ไล่ซื้อ':'ระดับประมาณการล่วงหน้า ยังไม่ใช่สัญญาณซื้อ รอให้สถานะเป็นสีเขียวก่อน'}</small></section>`:"";
   const time=item.trade?.t?new Date(item.trade.t).toLocaleString("th-TH"):"ไม่พบรายการซื้อขายล่าสุด";
-  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price)+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div><div class="metric"><span>ADX14</span><b>'+fmt(a.adx)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · สถานะ/คะแนนอิงผลสแกน 1D '+(item.signal?.checked_at?new Date(item.signal.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอผลสแกน")+' · IEX</div></article>';
+  return '<article class="stock-card"><div class="stock-head"><div><div class="symbol">'+symbol+'</div><div class="company">'+(NAMES[symbol]||"หุ้นสหรัฐฯ")+'</div></div><div class="card-actions"><span class="signal '+a.kind+'">'+a.signal+'</span>'+(state.symbols.includes(symbol)?'<button class="remove-stock" data-remove="'+symbol+'" aria-label="ลบ '+symbol+'">×</button>':'')+'</div></div><div class="price">'+(Number.isFinite(price)?"$"+fmt(price):"ไม่มีราคาล่าสุด")+'</div><div class="change '+cls+'">'+(change===null?"เทียบราคาปิดไม่ได้":(change>=0?"+":"")+change.toFixed(2)+"% จากแท่งก่อนหน้า")+'</div>'+decisionHtml+chartSvg(item.intradayBars?.length?item.intradayBars:bars,price,item.intradayBars?.length?"กราฟระหว่างวัน · แท่ง 5 นาที":"กราฟย้อนหลัง · รายวัน")+'<div class="metrics"><div class="metric"><span>EMA20 / EMA50</span><b>'+fmt(a.short)+' / '+fmt(a.long)+'</b></div><div class="metric"><span>RSI14</span><b>'+fmt(a.rsi)+'</b></div><div class="metric"><span>MACD</span><b>'+fmt(a.macd)+'</b></div><div class="metric"><span>ADX14</span><b>'+fmt(a.adx)+'</b></div></div>'+planHtml+'<div class="card-foot">ซื้อขายล่าสุด: '+time+' · คะแนน '+a.score+'/5 · สถานะ/คะแนนอิงผลสแกน 1D '+(item.signal?.checked_at?new Date(item.signal.checked_at).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}):"รอผลสแกน")+' · IEX</div></article>';
 }
 function setStatus(msg,ok=false){
   $("#connection").textContent=msg;
@@ -417,20 +417,27 @@ async function loadMarket(){
     if(!state.symbols.length){$("#cards").innerHTML='<article class="stock-card">ยังไม่มีหุ้นใน Watchlist ค้นหาและเพิ่มหุ้นได้ด้านบน</article>';return;}
     const displaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
     const usSymbols=displaySymbols.filter(s=>!isThaiSymbol(s)),thaiSymbols=displaySymbols.filter(isThaiSymbol);
-    const [dailyMarket,intradayMarket,signals]=await Promise.all([
-      usSymbols.length?fetchMarket(usSymbols,"1Day"):Promise.resolve({}),
-      usSymbols.length?fetchMarket(usSymbols,"5Min"):Promise.resolve({}),
-      usSymbols.length?fetchSignals(usSymbols):Promise.resolve({})
+    const [dailyResult,intradayResult,signalResult]=await Promise.all([
+      usSymbols.length?fetchMarket(usSymbols,"1Day").then(value=>({status:"fulfilled",value}),reason=>({status:"rejected",reason})):Promise.resolve({status:"fulfilled",value:{}}),
+      usSymbols.length?fetchMarket(usSymbols,"5Min").then(value=>({status:"fulfilled",value}),reason=>({status:"rejected",reason})):Promise.resolve({status:"fulfilled",value:{}}),
+      usSymbols.length?fetchSignals(usSymbols).then(value=>({status:"fulfilled",value}),reason=>({status:"rejected",reason})):Promise.resolve({status:"fulfilled",value:{}})
     ]);
+    if(dailyResult.status!=="fulfilled")throw dailyResult.reason;
+    const dailyMarket=dailyResult.value||{},intradayMarket=intradayResult.status==="fulfilled"?(intradayResult.value||{}):{},signals=signalResult.status==="fulfilled"?(signalResult.value||{}):{};
     state.market=dailyMarket;
-    for(const symbol of usSymbols)if(state.market[symbol]&&signals[symbol])state.market[symbol].signal=signals[symbol];
-    for(const symbol of usSymbols)if(state.market[symbol])state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
-    $("#cards").innerHTML=displaySymbols.map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลจาก IEX</p></article>')).join("");
+    for(const symbol of usSymbols){
+      if(!state.market[symbol])continue;
+      if(signals[symbol])state.market[symbol].signal=signals[symbol];
+      state.market[symbol].intradayBars=intradayMarket[symbol]?.bars||[];
+    }
+    $("#cards").innerHTML=displaySymbols.map(s=>isThaiSymbol(s)?renderThaiCard(s):(state.market[s]?renderCard(s,state.market[s]):'<article class="stock-card"><b>'+escapeHtml(s)+'</b><p>ไม่พบข้อมูลตลาดสำหรับ '+escapeHtml(s)+'</p></article>')).join("");
     state.symbols.filter(s=>!isThaiSymbol(s)).forEach(s=>{if(state.market[s])maybeNotify(s,state.market[s]);});
     const count=Object.values(state.market).reduce((n,x)=>n+(x.bars||[]).length,0);
-    setStatus(thaiSymbols.length?(usSymbols.length?"เชื่อมต่อแล้ว · หุ้นไทยแสดงกราฟเท่านั้น":"หุ้นไทย · กราฟ TradingView เท่านั้น"):"เชื่อมต่อแล้ว · Alpaca IEX",true);
+    const chartFallback=intradayResult.status!=="fulfilled";
+    const signalFallback=signalResult.status!=="fulfilled";
+    setStatus("เชื่อมต่อแล้ว · Alpaca IEX"+(chartFallback?" · ใช้กราฟรายวันสำรอง":"")+(signalFallback?" · คำนวณสถานะจากข้อมูลราคา":"") ,true);
     $("#updated").textContent="อัปเดต "+new Date().toLocaleString("th-TH")+" · ข้อมูลย้อนหลัง "+count+" แท่ง";
-  }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#cards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p><small>ตรวจ Worker URL, CORS และ Secrets ใน Cloudflare</small></article>';}
+  }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#cards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลตลาดไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p><small>ตรวจสอบการเชื่อมต่อ API และข้อมูลราคา</small></article>';}
   finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
 }
 async function addSymbol(symbol){
