@@ -532,7 +532,7 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
 }
 async function fetchYahooThai(env,symbol,timeframe="1Day") {
   try{return await fetchDataCedarThai(env,symbol,timeframe);}
-  catch(dataCedarError){console.warn("DATACEDAR_UNAVAILABLE",symbol,String(dataCedarError));return await fetchYahooThaiLegacy(symbol,timeframe);}
+  catch(dataCedarError){console.warn("DATACEDAR_UNAVAILABLE",symbol,String(dataCedarError));try{return await fetchYahooThaiLegacy(symbol,timeframe);}catch(yahooError){throw new Error("DataCedar: "+String(dataCedarError)+"; Yahoo fallback: "+String(yahooError));}}
 }
 async function fetchYahooThaiLegacy(symbol,timeframe="1Day") {
   const interval=timeframe==="5Min"?"5m":timeframe==="4Hour"?"60m":"1d",range=timeframe==="5Min"?"5d":timeframe==="4Hour"?"3mo":"1y",ttl=timeframe==="5Min"?60:timeframe==="4Hour"?300:900;
