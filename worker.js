@@ -596,16 +596,21 @@ async function reserveDataCedarSlot(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS datacedar_rate_limit (id INTEGER PRIMARY KEY CHECK(id=1), next_at INTEGER NOT NULL DEFAULT 0)").run();
   await env.DB.prepare("INSERT OR IGNORE INTO datacedar_rate_limit(id,next_at) VALUES(1,0)").run();
   const now=Date.now();
-  const row=await env.DB.prepare("UPDATE datacedar_rate_limit SET next_at=MAX(next_at,?)+1150 WHERE id=1 RETURNING next_at-1150 AS slot_at").bind(now).first();
+  const row=await env.DB.prepare("UPDATE datacedar_rate_limit SET next_at=MAX(next_at,?)+1250 WHERE id=1 RETURNING next_at-1250 AS slot_at").bind(now).first();
   if(!row||!Number.isFinite(Number(row.slot_at))) throw new Error("Unable to reserve DataCedar request slot");
   return Number(row.slot_at);
 }
 async function dataCedarFetch(env,url,options={}) {
-  const slotAt=await reserveDataCedarSlot(env);
-  const waitMs=Math.max(0,slotAt-Date.now());
-  if(waitMs) await new Promise(resolve=>setTimeout(resolve,waitMs));
-  // Start the network timeout only after this request reaches its reserved slot.
-  return await fetch(url,{...options,signal:AbortSignal.timeout(2800)});
+  for(let attempt=0;attempt<2;attempt++) {
+    const slotAt=await reserveDataCedarSlot(env),waitMs=Math.max(0,slotAt-Date.now());
+    if(waitMs) await new Promise(resolve=>setTimeout(resolve,waitMs));
+    const response=await fetch(url,{...options,signal:AbortSignal.timeout(2800)});
+    if(response.status!==429||attempt===1)return response;
+    let retrySeconds=1;
+    try { const body=await response.clone().json(); retrySeconds=Math.max(1,Number(body?.error?.details?.retry_after)||1); } catch(e) {}
+    await new Promise(resolve=>setTimeout(resolve,retrySeconds*1000+250));
+  }
+  throw new Error("DataCedar rate limit retry exhausted");
 }
 async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(!env.DATACEDAR_API_KEY)throw new Error("DATACEDAR_API_KEY is not configured");
@@ -626,8 +631,39 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   await cache.put(staleKey,new Response(body,{headers:{"Content-Type":"application/json","Cache-Control":"public, max-age=604800"}}));
   return data;
 }
+function thaiMarketStatus(now=new Date()) {
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Bangkok",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23",weekday:"short"}).formatToParts(now);
+  const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+  const date=p.year+"-"+p.month+"-"+p.day,minute=Number(p.hour)*60+Number(p.minute),weekday=p.weekday;
+  const weekend=weekday==="Sat"||weekday==="Sun";
+  const holidays2026=new Set(["2026-01-01","2026-01-02","2026-03-03","2026-04-06","2026-04-13","2026-04-14","2026-04-15","2026-05-01","2026-05-04","2026-06-01","2026-06-03","2026-07-28","2026-07-29","2026-08-12","2026-10-13","2026-10-16","2026-10-23","2026-12-07","2026-12-10","2026-12-31"]);
+  const holiday=date.startsWith("2026-")&&holidays2026.has(date);
+  const open=!weekend&&!holiday&&((minute>=600&&minute<750)||(minute>=840&&minute<990));
+  let reason="market_closed";
+  if(weekend)reason="weekend";else if(holiday)reason="set_holiday";else if(minute>=750&&minute<840)reason="lunch_break";else if(!open)reason="outside_trading_hours";
+  return {open,reason,date,time:p.hour+":"+p.minute,timezone:"Asia/Bangkok"};
+}
+async function latestThaiCachedMarket(symbol,timeframe) {
+  const cache=caches.default,items=[];
+  for(const provider of ["datacedar","yahoo"]) {
+    const base="https://ai-stock-watcher-cache.invalid/"+provider+"/"+encodeURIComponent(symbol)+"/"+timeframe;
+    for(const suffix of ["/fresh","/stale"]) {
+      const response=await cache.match(new Request(base+suffix));
+      if(!response)continue;
+      try { const data=await response.json(); if(data?.bars?.length||data?.trade?.p)items.push(data); } catch(e) {}
+    }
+  }
+  items.sort((a,b)=>new Date(b.trade?.t||b.bars?.at(-1)?.t||0).getTime()-new Date(a.trade?.t||a.bars?.at(-1)?.t||0).getTime());
+  return items[0]||null;
+}
 async function fetchYahooThai(env,symbol,timeframe="1Day") {
-  // Race both providers. A slow DataCedar response must not block a faster Yahoo quote.
+  const market=thaiMarketStatus();
+  if(!market.open) {
+    const cached=await latestThaiCachedMarket(symbol,timeframe);
+    if(cached)return {...cached,stale:false,marketClosed:true,marketStatus:market.reason,marketCheckedAt:market.date+"T"+market.time+":00+07:00",marketNote:"ตลาดหุ้นไทยปิดทำการ/อยู่นอกเวลาซื้อขาย ใช้ข้อมูลล่าสุดจากรอบตลาดก่อนหน้า"};
+    return {bars:[],trade:null,currency:"THB",exchange:"SET",marketClosed:true,marketStatus:market.reason,error:"ตลาดหุ้นไทยปิดทำการ/อยู่นอกเวลาซื้อขาย และยังไม่มีข้อมูลแคชล่าสุด"};
+  }
+  // Race both providers only while the SET is actively trading.
   let dataCedarStale=null,dataCedarError=null,yahooError=null;
   const primary=fetchDataCedarThai(env,symbol,timeframe).then(data=>{
     if(data?.stale){dataCedarStale=data;throw new Error(data.error||"DataCedar returned stale cache");}
