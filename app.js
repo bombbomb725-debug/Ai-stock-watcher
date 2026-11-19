@@ -512,7 +512,7 @@ async function runScreener(){
     screenerRanked=data.ideas||[];
     screenerPage=1;
     window.screenerScannedCount=Number(data.scannedCount||0);
-    window.screenerSourceLabel=(data.source?.label||"หุ้นจากโพสต์ @StockSavvyShay")+(data.source?.sourceUpdatedAt?" · ต้นทาง "+new Date(data.source.sourceUpdatedAt+"T00:00:00Z").toLocaleDateString("th-TH",{timeZone:"Asia/Bangkok"}):"");
+    window.screenerSourceLabel=(data.source?.label||"หุ้นจากโพสต์ @StockSavvyShay")+(data.source?.reviewedAt?" · ตรวจสอบโพสต์ "+new Date(data.source.reviewedAt+"T00:00:00Z").toLocaleDateString("th-TH",{timeZone:"Asia/Bangkok"}):"")+(data.source?.sourceUpdatedAt?" · รายการติดตาม "+new Date(data.source.sourceUpdatedAt+"T00:00:00Z").toLocaleDateString("th-TH",{timeZone:"Asia/Bangkok"}):"");
     renderScreenerPage();
   }catch(e){root.textContent="คัดกรองไม่สำเร็จ: "+e.message;}
   finally{btn.disabled=false;btn.textContent="คัดกรองอีกครั้ง";}
