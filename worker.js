@@ -1059,6 +1059,7 @@ export default {
       scanAlerts(env),
       (async()=>{
         if(!env.DB)return;
+        await ensurePendingStockActionTable(env);
         const now=Math.floor(Date.now()/1000);
         await env.DB.prepare("DELETE FROM line_pending_stock_actions WHERE expires_at<=?").bind(now).run();
         await env.DB.prepare("DELETE FROM user_input_modes WHERE expires_at<=?").bind(now).run();
