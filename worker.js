@@ -589,19 +589,23 @@ async function fetchLatestTrades(env,symbols) {
   const data=await r.json();
   return data.trades||{};
 }
-// D1 atomic gate: one DataCedar request per second across all Worker isolates.
+// D1-backed FIFO rate limiter: reserve a future slot instead of dropping requests.
+// This keeps Thai symbols from being silently skipped when several are refreshed together.
 async function reserveDataCedarSlot(env) {
   if(!env.DB) throw new Error("D1 binding is required for DataCedar rate limiting");
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS datacedar_rate_limit (id INTEGER PRIMARY KEY CHECK(id=1), next_at INTEGER NOT NULL DEFAULT 0)").run();
   await env.DB.prepare("INSERT OR IGNORE INTO datacedar_rate_limit(id,next_at) VALUES(1,0)").run();
   const now=Date.now();
-  const row=await env.DB.prepare("UPDATE datacedar_rate_limit SET next_at=? WHERE id=1 AND next_at<=? RETURNING id").bind(now+1150,now).first();
-  return Boolean(row);
+  const row=await env.DB.prepare("UPDATE datacedar_rate_limit SET next_at=MAX(next_at,?)+1150 WHERE id=1 RETURNING next_at-1150 AS slot_at").bind(now).first();
+  if(!row||!Number.isFinite(Number(row.slot_at))) throw new Error("Unable to reserve DataCedar request slot");
+  return Number(row.slot_at);
 }
-async function dataCedarFetch(env,url,options) {
-  const reserved=await reserveDataCedarSlot(env);
-  if(!reserved) return null;
-  return await fetch(url,options);
+async function dataCedarFetch(env,url,options={}) {
+  const slotAt=await reserveDataCedarSlot(env);
+  const waitMs=Math.max(0,slotAt-Date.now());
+  if(waitMs) await new Promise(resolve=>setTimeout(resolve,waitMs));
+  // Start the network timeout only after this request reaches its reserved slot.
+  return await fetch(url,{...options,signal:AbortSignal.timeout(2800)});
 }
 async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(!env.DATACEDAR_API_KEY)throw new Error("DATACEDAR_API_KEY is not configured");
