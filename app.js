@@ -487,7 +487,7 @@ async function searchAssets(){
     const response=await fetch(state.apiUrl.replace(/\/$/,"")+"/api/assets?q="+encodeURIComponent(q),{cache:"no-store"});
     const data=await response.json();if(!response.ok)throw new Error(data.error||"ค้นหาไม่สำเร็จ");
     state.assets=data.assets||[];state.assetNames=state.assetNames||{};state.assets.forEach(a=>{state.assetNames[a.symbol]=a.name;});
-    root.innerHTML=state.assets.length?state.assets.map(a=>'<button class="search-result" type="button" data-symbol="'+escapeHtml(a.symbol.replace(/\.BK$/,""))+(a.market==="THAI"?".BK":'')+'"><b>'+escapeHtml(a.symbol.replace(/\.BK$/i,""))+'</b><span>'+escapeHtml(a.name)+'</span><small>'+(a.market==="THAI"?"หุ้นไทย · "+escapeHtml(a.exchange):"หุ้นสหรัฐฯ · "+escapeHtml(a.exchange))+' · เพิ่ม +</small></button>').join(""):"ไม่พบหุ้นที่ตรงกัน";
+    root.innerHTML=state.assets.length?state.assets.map(a=>'<button class="search-result" type="button" data-symbol="'+escapeHtml(a.symbol)+'" data-market="'+(a.market==="THAI"?"THAI":"US")+'"><b>'+escapeHtml(a.symbol.replace(/\.BK$/i,""))+'</b><span>'+escapeHtml(a.name)+'</span><small>'+(a.market==="THAI"?"หุ้นไทย · "+escapeHtml(a.exchange):"หุ้นสหรัฐฯ · "+escapeHtml(a.exchange))+' · เพิ่ม +</small></button>').join(""):"ไม่พบหุ้นที่ตรงกัน";
   }catch(e){root.textContent="ค้นหาไม่สำเร็จ: "+e.message;}
 }
 let screenerRanked=[],screenerPage=1;
@@ -529,7 +529,7 @@ $("#saveUrl").addEventListener("click",()=>{
 });
 $("#addStock").addEventListener("click",searchAssets);
 $("#stockSearch").addEventListener("keydown",e=>{if(e.key==="Enter")searchAssets();});
-$("#searchResults").addEventListener("click",e=>{const b=e.target.closest("[data-symbol]");if(b)addSymbol(b.dataset.symbol);});
+$("#searchResults").addEventListener("click",e=>{const b=e.target.closest("[data-symbol]");if(b)addSymbol(b.dataset.symbol,b.dataset.market||"AUTO");});
 $("#usCards").addEventListener("click",e=>{
   const b=e.target.closest("[data-remove]");if(!b)return;
   removeSymbol(b.dataset.remove);
