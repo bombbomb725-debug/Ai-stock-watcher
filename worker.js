@@ -154,11 +154,20 @@ async function addWatch(env,userId,symbol,market="AUTO") {
   return {ok:true,symbols:await getWatchlist(env,userId)};
 }
 async function removeWatch(env,userId,symbol) {
-  symbol=await normalizeSymbol(env,symbol);
+  const requested=cleanSymbol(symbol);
+  const normalized=await normalizeSymbol(env,requested);
+  const candidates=[...new Set([requested,normalized])];
+  // Also remove a legacy bare Thai ticker if the stored row predates .BK normalization.
+  if(normalized.endsWith(".BK"))candidates.push(normalized.slice(0,-3));
+  if(isThaiSymbol(requested)&&!requested.endsWith(".BK"))candidates.push(requested+".BK");
+  const unique=[...new Set(candidates.map(cleanSymbol))];
   await getWatchlist(env,userId);
-  await env.DB.prepare("DELETE FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
-  await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol=?").bind(userId,symbol).run();
-  return {ok:true,symbols:await getWatchlist(env,userId)};
+  const marks=unique.map(()=>"?").join(",");
+  const deleted=await env.DB.prepare("DELETE FROM watchlist WHERE user_id=? AND symbol IN ("+marks+")").bind(userId,...unique).run();
+  await env.DB.prepare("DELETE FROM user_stock_state WHERE user_id=? AND symbol IN ("+marks+")").bind(userId,...unique).run();
+  const stillThere=await env.DB.prepare("SELECT symbol FROM watchlist WHERE user_id=? AND symbol IN ("+marks+")").bind(userId,...unique).all();
+  if((stillThere.results||[]).length)throw new Error("ลบ "+requested+" ไม่สำเร็จ: หุ้นยังอยู่ในฐานข้อมูล");
+  return {ok:true,removed:(deleted.meta?.changes||0)>0,symbols:await getWatchlist(env,userId)};
 }
 
 function richMenuFont() {
@@ -516,9 +525,13 @@ async function handleLineWebhook(raw,signature,env) {
               const result=await addWatch(env,user.id,symbol);
               results.push(result.ok?(result.already?"มี "+symbol+" อยู่แล้ว":"เพิ่ม "+symbol+" สำเร็จ"):"เพิ่ม "+symbol+" ไม่สำเร็จ: "+result.error);
             } else if(pending.action==="remove") {
-              const before=await getWatchlist(env,user.id);
-              if(!before.includes(symbol))results.push("ไม่พบ "+symbol+" ใน Watchlist");
-              else {const result=await removeWatch(env,user.id,symbol);results.push("ลบ "+symbol+" สำเร็จ · เหลือ "+result.symbols.length+" หุ้น");}
+              try {
+                const result=await removeWatch(env,user.id,symbol);
+                results.push(result.removed?"ลบ "+symbol+" สำเร็จ · เหลือ "+result.symbols.length+" หุ้น":"ไม่พบ "+symbol+" ใน Watchlist");
+              } catch(error) {
+                console.error("LINE_REMOVE_STOCK_FAILED",user.id,symbol,String(error));
+                results.push("ลบ "+symbol+" ไม่สำเร็จ: "+String(error.message||error).slice(0,120));
+              }
             }
           }
           await env.DB.prepare("DELETE FROM line_pending_stock_actions WHERE user_id=?").bind(user.id).run();
