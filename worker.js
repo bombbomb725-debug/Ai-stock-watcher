@@ -3,8 +3,9 @@ const ALLOWED_ORIGINS = new Set(["https://bombbomb725-debug.github.io"]);
 const encoder = new TextEncoder();
 // 50-symbol discovery universe from recent public @StockSavvyShay X-post tracking (90-day window).
 // These are mentions/watchlist candidates, not all explicit buy recommendations.
-const SHAY_STOCK_UNIVERSE = ["NVDA","RKLB","META","NBIS","GOOGL","AMZN","MU","AMD","IREN","CRWV","PLTR","TSLA","ONDS","SKHY","ASTS","AVGO","INTC","TSM","CIFR","CRWD","MRVL","BE","ORCL","AAPL","VRT","SNDK","CRDO","SOFI","CBRS","AEHR","LITE","NVTS","ON","ARM","SNOW","QCOM","AAOI","GEV","DELL","MELI","WULF","NOW","APP","IONQ","ASML","VPG","ZETA","CORMA","ULA","NEA"];
+const SHAY_STOCK_UNIVERSE = ["NVDA","RKLB","META","NBIS","GOOGL","AMZN","MU","AMD","IREN","CRWV","PLTR","TSLA","ONDS","SKHY","ASTS","AVGO","INTC","TSM","CIFR","CRWD","MRVL","BE","ORCL","AAPL","VRT","SNDK","CRDO","SOFI","CBRS","AEHR","LITE","NVTS","ON","ARM","SNOW","QCOM","AAOI","GEV","DELL","MELI","WULF","NOW","APP","IONQ","ASML","VPG","ZETA","CORMA","PANW","NEA"];
 const SHAY_SOURCE_UPDATED_AT = "2026-11-17";
+const SHAY_LAST_REVIEWED_AT = "2026-11-19";
 
 function corsHeaders(origin) {
   const h = { "Access-Control-Allow-Methods":"GET, POST, OPTIONS", "Access-Control-Allow-Headers":"Content-Type, Authorization", "Access-Control-Max-Age":"86400", "Vary":"Origin" };
@@ -923,7 +924,7 @@ async function apiHandler(request,env,url,headers) {
       qualifiedCount:ranked.filter(x=>x.score>=4).length,
       minScore:0,
       fetchedAt:new Date().toISOString(),
-      source:{label:"หุ้นที่พบในโพสต์สาธารณะของ @StockSavvyShay (คัดกรองจากรายการติดตาม 90 วัน)",accountUrl:"https://x.com/StockSavvyShay",trackerUrl:"https://www.six7alpha.com/invest-like/stock-savvy-shay",sourceUpdatedAt:SHAY_SOURCE_UPDATED_AT,disclaimer:"รายการติดตามนี้ AI สกัดจากโพสต์สาธารณะ อาจมีหุ้นที่ถูกกล่าวถึงในเชิงวิเคราะห์หรือยกตัวอย่าง ไม่ได้หมายความว่า Shay แนะนำซื้อทุกตัว"},
+      source:{label:"หุ้นที่พบในโพสต์สาธารณะของ @StockSavvyShay (คัดกรองจากรายการติดตาม 90 วัน)",accountUrl:"https://x.com/StockSavvyShay",trackerUrl:"https://www.six7alpha.com/invest-like/stock-savvy-shay",sourceUpdatedAt:SHAY_SOURCE_UPDATED_AT,reviewedAt:SHAY_LAST_REVIEWED_AT,disclaimer:"รายการติดตามนี้ AI สกัดจากโพสต์สาธารณะ อาจมีหุ้นที่ถูกกล่าวถึงในเชิงวิเคราะห์หรือยกตัวอย่าง ไม่ได้หมายความว่า Shay แนะนำซื้อทุกตัว"},
       universe:"Shay Boloor / StockSavvyShay public X-post tracking"
     },200,headers);
   }
