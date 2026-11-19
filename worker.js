@@ -1,6 +1,10 @@
 const MAX_WATCHLIST = 50;
 const ALLOWED_ORIGINS = new Set(["https://bombbomb725-debug.github.io"]);
 const encoder = new TextEncoder();
+// 50-symbol discovery universe from recent public @StockSavvyShay X-post tracking (90-day window).
+// These are mentions/watchlist candidates, not all explicit buy recommendations.
+const SHAY_STOCK_UNIVERSE = ["NVDA","RKLB","META","NBIS","GOOGL","AMZN","MU","AMD","IREN","CRWV","PLTR","TSLA","ONDS","SKHY","ASTS","AVGO","INTC","TSM","CIFR","CRWD","MRVL","BE","ORCL","AAPL","VRT","SNDK","CRDO","SOFI","CBRS","AEHR","LITE","NVTS","ON","ARM","SNOW","QCOM","AAOI","GEV","DELL","MELI","WULF","NOW","APP","IONQ","ASML","VPG","ZETA","CORMA","ULA","NEA"];
+const SHAY_SOURCE_UPDATED_AT = "2026-11-17";
 
 function corsHeaders(origin) {
   const h = { "Access-Control-Allow-Methods":"GET, POST, OPTIONS", "Access-Control-Allow-Headers":"Content-Type, Authorization", "Access-Control-Max-Age":"86400", "Vary":"Origin" };
@@ -895,31 +899,13 @@ async function apiHandler(request,env,url,headers) {
   }
   if(url.pathname==="/api/screener"&&request.method==="GET") {
     if(!env.ALPACA_KEY||!env.ALPACA_SECRET)return json({error:"Worker secrets ALPACA_KEY / ALPACA_SECRET missing"},503,headers);
-    const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};
-    const requests=await Promise.allSettled([
-      fetch("https://data.alpaca.markets/v1beta1/screener/stocks/most-actives?by=volume&top=50",{headers:auth}),
-      fetch("https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=50",{headers:auth})
-    ]);
-    const payloads=[];
-    for(let i=0;i<requests.length;i++) {
-      const result=requests[i];
-      if(result.status!=="fulfilled"||!result.value.ok)continue;
-      try{payloads.push(await result.value.json());}catch(e){console.warn("SCREENER_JSON_ERROR",String(e));}
-    }
-    if(!payloads.length)return json({error:"Alpaca Screener ใช้งานไม่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"},502,headers);
-    const symbols=new Set();
-    for(const p of payloads) {
-      for(const x of p.most_actives||[])if(/^[A-Z]{1,5}(?:\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
-      for(const x of [...(p.gainers||[]),...(p.losers||[])])if(/^[A-Z]{1,5}(?:\.[A-Z])?$/.test(x.symbol||""))symbols.add(x.symbol);
-    }
-    const candidates=[...symbols];
-    if(!candidates.length)return json({ideas:[],candidateCount:0,scannedCount:0,fetchedAt:new Date().toISOString()},200,headers);
+    const candidates=SHAY_STOCK_UNIVERSE;
     const market={};
     const batches=await Promise.allSettled(Array.from({length:Math.ceil(candidates.length/50)},(_,i)=>fetchMarket(env,candidates.slice(i*50,(i+1)*50),"1Day")));
     for(let i=0;i<batches.length;i++) {
       const result=batches[i];
       if(result.status==="fulfilled")Object.assign(market,result.value.stocks||{});
-      else console.error("SCREENER_MARKET_BATCH_ERROR",i,String(result.reason));
+      else console.error("SHAY_SCREENER_MARKET_BATCH_ERROR",i,String(result.reason));
     }
     const ranked=[];
     for(const symbol of candidates) {
@@ -927,11 +913,19 @@ async function apiHandler(request,env,url,headers) {
       if(bars.length<55)continue;
       const signal=analyzeStatus(bars,Number(item.trade?.p),"America/New_York");
       const price=Number(item.trade?.p)>0?Number(item.trade.p):Number(bars[bars.length-1]?.c);
-      ranked.push({symbol,score:signal.score,status:signal.status,label:signal.label,price:Number.isFinite(price)?price:null,ema20:signal.ema20,ema50:signal.ema50,rsi:signal.rsi,macd:signal.macd,adx:signal.adx});
+      ranked.push({symbol,score:signal.score,status:signal.status,label:signal.label,price:Number.isFinite(price)?price:null,ema20:signal.ema20,ema50:signal.ema50,rsi:signal.rsi,macd:signal.macd,adx:signal.adx,source:"@StockSavvyShay · X"});
     }
     ranked.sort((a,b)=>b.score-a.score||(a.status==="buy"?-1:0)-(b.status==="buy"?-1:0)||a.symbol.localeCompare(b.symbol));
-    const qualified=ranked.filter(x=>x.score>=4);
-    return json({ideas:ranked.slice(0,50),candidateCount:candidates.length,scannedCount:ranked.length,qualifiedCount:qualified.length,minScore:0,fetchedAt:new Date().toISOString(),universe:"Alpaca US most-active stocks + top gainers/losers"},200,headers);
+    return json({
+      ideas:ranked.slice(0,50),
+      candidateCount:candidates.length,
+      scannedCount:ranked.length,
+      qualifiedCount:ranked.filter(x=>x.score>=4).length,
+      minScore:0,
+      fetchedAt:new Date().toISOString(),
+      source:{label:"หุ้นที่พบในโพสต์สาธารณะของ @StockSavvyShay (คัดกรองจากรายการติดตาม 90 วัน)",accountUrl:"https://x.com/StockSavvyShay",trackerUrl:"https://www.six7alpha.com/invest-like/stock-savvy-shay",sourceUpdatedAt:SHAY_SOURCE_UPDATED_AT,disclaimer:"รายการติดตามนี้ AI สกัดจากโพสต์สาธารณะ อาจมีหุ้นที่ถูกกล่าวถึงในเชิงวิเคราะห์หรือยกตัวอย่าง ไม่ได้หมายความว่า Shay แนะนำซื้อทุกตัว"},
+      universe:"Shay Boloor / StockSavvyShay public X-post tracking"
+    },200,headers);
   }
   if(url.pathname==="/api/ideas"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
