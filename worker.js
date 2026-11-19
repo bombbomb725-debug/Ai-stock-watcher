@@ -534,7 +534,7 @@ async function handleLineWebhook(raw,signature,env) {
       }
     } else if(cmd.action==="add_prompt") {
       await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"add",now+180).run();
-      await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการเพิ่มได้เลย เช่น\nAMZN\nหรือหลายตัว: AMZN NVDA\nหรือคั่นด้วยจุลภาค: AMZN,NVDA\nหมดเวลารับรายการใน 10 นาที");
+      await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการเพิ่มได้เลย เช่น\\nAMZN หรือ AMZN NVDA\\nหมดเวลารับรายการใน 3 นาที");
     } else if(cmd.action==="remove_menu") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length)await lineReply(env,event.replyToken,"Watchlist ยังว่าง ไม่มีหุ้นให้ลบ");
@@ -1055,6 +1055,14 @@ export default {
     try{return await apiHandler(request,env,url,headers);}catch(e){console.error("API_ERROR",String(e));return json({error:"Internal API error",detail:String(e).slice(0,250)},500,headers);}
   },
   async scheduled(event,env,ctx) {
-    ctx.waitUntil(scanAlerts(env));
+    ctx.waitUntil(Promise.all([
+      scanAlerts(env),
+      (async()=>{
+        if(!env.DB)return;
+        const now=Math.floor(Date.now()/1000);
+        await env.DB.prepare("DELETE FROM line_pending_stock_actions WHERE expires_at<=?").bind(now).run();
+        await env.DB.prepare("DELETE FROM user_input_modes WHERE expires_at<=?").bind(now).run();
+      })()
+    ]));
   }
 };
