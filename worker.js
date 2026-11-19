@@ -134,8 +134,17 @@ async function getWatchlist(env,userId) {
   }
   return [...new Set(normalized)];
 }
-async function addWatch(env,userId,symbol) {
-  symbol=await normalizeSymbol(env,symbol);
+async function addWatch(env,userId,symbol,market="AUTO") {
+  market=String(market||"AUTO").toUpperCase();
+  if(market==="US") {
+    symbol=cleanSymbol(symbol);
+    if(!/^[A-Z][A-Z0-9]{0,9}$/.test(symbol)||isThaiSymbol(symbol))throw new Error("Ticker หุ้นสหรัฐฯ ไม่ถูกต้อง");
+  } else if(market==="THAI") {
+    symbol=cleanSymbol(symbol).replace(/\.BK$/,"")+".BK";
+    if(!isThaiSymbol(symbol))throw new Error("Ticker หุ้นไทยไม่ถูกต้อง");
+  } else {
+    symbol=await normalizeSymbol(env,symbol);
+  }
   await getWatchlist(env,userId);
   const exists=await env.DB.prepare("SELECT 1 AS yes FROM watchlist WHERE user_id=? AND symbol=?").bind(userId,symbol).first();
   if(exists)return {ok:true,already:true,symbols:await getWatchlist(env,userId)};
@@ -939,9 +948,11 @@ async function apiHandler(request,env,url,headers) {
     if(url.pathname==="/api/me"&&request.method==="GET")return json({user:{displayName:user.display_name,pictureUrl:null},symbols:await getWatchlist(env,user.id)},200,headers);
     if(url.pathname==="/api/watchlist"&&request.method==="GET")return json({symbols:await getWatchlist(env,user.id),max:MAX_WATCHLIST},200,headers);
     if(url.pathname==="/api/watchlist/add"&&request.method==="POST") {
-      const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol);
-      if(!validSymbol(symbol))return json({error:"Ticker ไม่ถูกต้อง"},400,headers);
-      const result=await addWatch(env,user.id,symbol);let lineNotified=false;if(result.ok&&!result.already&&user.line_user_id){try{await linePush(env,user.line_user_id,"AI Stock Watcher · เพิ่มหุ้นจากเว็บไซต์สำเร็จ ✓\\n"+symbol+" ถูกบันทึกใน Watchlist บัญชี LINE และเว็บเดียวกันแล้ว\\nรายการปัจจุบัน "+result.symbols.length+"/50");lineNotified=true;}catch(e){console.error("WEB_ADD_LINE_CONFIRMATION_FAILED",String(e));}}return json({...result,lineSynced:result.ok,lineNotified},result.ok?200:409,headers);
+      const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol),market=String(body.market||"AUTO").toUpperCase();
+      if(!validSymbol(symbol)||!["AUTO","US","THAI"].includes(market))return json({error:"Ticker หรือตลาดไม่ถูกต้อง"},400,headers);
+      let result;
+      try { result=await addWatch(env,user.id,symbol,market); }
+      catch(e) { return json({error:e.message||"เพิ่มหุ้นไม่สำเร็จ"},400,headers); }let lineNotified=false;if(result.ok&&!result.already&&user.line_user_id){try{await linePush(env,user.line_user_id,"AI Stock Watcher · เพิ่มหุ้นจากเว็บไซต์สำเร็จ ✓\\n"+symbol+" ถูกบันทึกใน Watchlist บัญชี LINE และเว็บเดียวกันแล้ว\\nรายการปัจจุบัน "+result.symbols.length+"/50");lineNotified=true;}catch(e){console.error("WEB_ADD_LINE_CONFIRMATION_FAILED",String(e));}}return json({...result,lineSynced:result.ok,lineNotified},result.ok?200:409,headers);
     }
     if(url.pathname==="/api/watchlist/remove"&&request.method==="POST") {
       const body=await request.json().catch(()=>({})),symbol=cleanSymbol(body.symbol);
