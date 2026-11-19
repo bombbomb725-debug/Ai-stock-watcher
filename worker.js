@@ -589,38 +589,19 @@ async function fetchLatestTrades(env,symbols) {
   const data=await r.json();
   return data.trades||{};
 }
-// A D1-backed global reservation queue coordinates every Worker isolate.
-let dataCedarQueue=Promise.resolve();
-let dataCedarQueueTableReady=null;
-const dataCedarInflight=new Map();
+// D1 atomic gate: one DataCedar request per second across all Worker isolates.
 async function reserveDataCedarSlot(env) {
   if(!env.DB) throw new Error("D1 binding is required for DataCedar rate limiting");
-  if(!dataCedarQueueTableReady) dataCedarQueueTableReady=env.DB.prepare("CREATE TABLE IF NOT EXISTS datacedar_rate_limit (id INTEGER PRIMARY KEY CHECK(id=1), next_at INTEGER NOT NULL DEFAULT 0)").run();
-  await dataCedarQueueTableReady;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS datacedar_rate_limit (id INTEGER PRIMARY KEY CHECK(id=1), next_at INTEGER NOT NULL DEFAULT 0)").run();
   await env.DB.prepare("INSERT OR IGNORE INTO datacedar_rate_limit(id,next_at) VALUES(1,0)").run();
   const now=Date.now();
-  const row=await env.DB.prepare("UPDATE datacedar_rate_limit SET next_at=MAX(next_at,?)+1100 WHERE id=1 RETURNING next_at-1100 AS slot_at").bind(now).first();
-  if(!row||!Number.isFinite(Number(row.slot_at))) throw new Error("Unable to reserve DataCedar request slot");
-  const wait=Math.max(0,Number(row.slot_at)-Date.now());
-  if(wait) await new Promise(resolve=>setTimeout(resolve,wait));
+  const row=await env.DB.prepare("UPDATE datacedar_rate_limit SET next_at=? WHERE id=1 AND next_at<=? RETURNING id").bind(now+1150,now).first();
+  return Boolean(row);
 }
-async function dataCedarFetch(env,url,options,symbol,timeframe) {
-  const key=symbol+"|"+timeframe;
-  if(dataCedarInflight.has(key)) return dataCedarInflight.get(key);
-  const task=dataCedarQueue.then(async()=>{
-    await reserveDataCedarSlot(env);
-    let response=await fetch(url,options);
-    if(response.status===429) {
-      const retry=Math.max(1100,Number(response.headers.get("Retry-After")||1)*1000);
-      await new Promise(resolve=>setTimeout(resolve,Math.min(retry,5000)));
-      await reserveDataCedarSlot(env);
-      response=await fetch(url,options);
-    }
-    return response;
-  });
-  dataCedarQueue=task.then(()=>undefined,()=>undefined);
-  dataCedarInflight.set(key,task);
-  try{return await task;}finally{dataCedarInflight.delete(key);}
+async function dataCedarFetch(env,url,options) {
+  const reserved=await reserveDataCedarSlot(env);
+  if(!reserved) return null;
+  return await fetch(url,options);
 }
 async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(!env.DATACEDAR_API_KEY)throw new Error("DATACEDAR_API_KEY is not configured");
@@ -630,7 +611,7 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   if(fresh)return await fresh.json();
   const sid="set:"+symbol.replace(/\.BK$/i,"").toUpperCase();
   const url="https://api.datacedar.com/v3/stocks/"+encodeURIComponent(sid)+"/bars?timeframe="+tf+"&adjustment=raw&order=asc&limit=500";
-  let r;try{r=await dataCedarFetch(env,url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(12000)},symbol,timeframe);}catch(e){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar timeout/network: "+String(e)+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw e;}
+  let r;try{r=await dataCedarFetch(env,url,{headers:{"Accept":"application/json","X-API-Key":env.DATACEDAR_API_KEY},signal:AbortSignal.timeout(5000)});if(!r){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar request queued by global rate limit; showing cached data and suppressing buy signal"};}throw new Error("DataCedar rate limit queue busy; retry later");}}catch(e){const stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar timeout/network: "+String(e)+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw e;}
   if(!r.ok){const detail=(await r.text()).slice(0,240),stale=await cache.match(staleKey);if(stale){const saved=await stale.json();return {...saved,trade:null,stale:true,error:"DataCedar API "+r.status+": "+detail+"; แสดงข้อมูลเก่าจากแคชและงดสัญญาณซื้อ"};}throw new Error("DataCedar API "+r.status+": "+detail);}
   const payload=await r.json();if(payload?.error)throw new Error(payload.error.message||"DataCedar API error");
   if(!Array.isArray(payload?.data))throw new Error("DataCedar response format invalid");
