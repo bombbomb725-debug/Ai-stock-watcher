@@ -427,7 +427,9 @@ async function refreshIntradayBars(){
       state.market[symbol].intradayBars=data[symbol].bars||state.market[symbol].intradayBars||[];
       if(data[symbol].trade)state.market[symbol].trade=data[symbol].trade;
     }
-    renderMarketCards(symbols,state.market);
+    // Refresh only US market data, but always render the complete Watchlist.
+    const allDisplaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
+    renderMarketCards(allDisplaySymbols,state.market);
     $("#updated").textContent="อัปเดตกราฟระหว่างวัน "+new Date().toLocaleTimeString("th-TH")+" · แท่ง 5 นาที";
   }catch(e){console.warn("INTRADAY_BAR_REFRESH_FAILED",e);}
   finally{state.intradayBusy=false;}
@@ -443,7 +445,9 @@ async function refreshLiveQuotes(){
       const trade=data.trades?.[symbol];
       if(trade&&state.market[symbol])state.market[symbol].trade=trade;
     }
-    renderMarketCards(symbols,state.market);
+    // Live quote refresh is US-only; preserve Thai symbols when repainting both cards.
+    const allDisplaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
+    renderMarketCards(allDisplaySymbols,state.market);
     $("#updated").textContent="อัปเดตราคาสด "+new Date().toLocaleTimeString("th-TH")+" · Alpaca IEX · รีเฟรชทุก 15 วินาทีขณะตลาดเปิด";
     setStatus("ตลาดสหรัฐฯ เปิด · อัปเดตราคาสดอัตโนมัติ",true);
   }catch(e){console.warn("LIVE_QUOTE_REFRESH_FAILED",e);}
