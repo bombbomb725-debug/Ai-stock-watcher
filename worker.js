@@ -250,11 +250,16 @@ async function ensureRichMenu(env) {
   return menu.richMenuId;
 }
 
-function watchlistQuickReply(symbols) {
-  const items=(symbols||[]).slice(0,13).map(symbol=>({
+function watchlistQuickReply(symbols,withConfirm=false) {
+  const limit=withConfirm?11:13;
+  const items=(symbols||[]).slice(0,limit).map(symbol=>({
     type:"action",
     action:{type:"message",label:symbol,text:"ลบ "+symbol}
   }));
+  if(withConfirm)items.push(
+    {type:"action",action:{type:"message",label:"ยืนยัน",text:"ยืนยัน"}},
+    {type:"action",action:{type:"message",label:"ยกเลิก",text:"ยกเลิก"}}
+  );
   return items.length?{items}:undefined;
 }
 function stockActionConfirmQuickReply() {
@@ -553,15 +558,28 @@ async function handleLineWebhook(raw,signature,env) {
     } else if(cmd.action==="invalid_symbols") {
       await lineReply(env,event.replyToken,"รูปแบบตัวย่อไม่ถูกต้อง กรุณาส่งเช่น AMZN หรือ AMZN NVDA หรือ AMZN,NVDA");
     } else if(cmd.action==="add"||cmd.action==="remove") {
-      const symbols=[...new Set((cmd.symbols||[]).map(cleanSymbol))];
+      let symbols=[...new Set((cmd.symbols||[]).map(cleanSymbol))];
+      if(cmd.action==="remove") {
+        const previous=await env.DB.prepare("SELECT action,symbols_json FROM line_pending_stock_actions WHERE user_id=? AND expires_at>?").bind(user.id,now).first();
+        if(previous?.action==="remove") {
+          let prior=[]; try { prior=JSON.parse(previous.symbols_json)||[]; } catch {}
+          symbols=[...new Set([...prior,...symbols])];
+        }
+      }
       if(!symbols.length) {
         await lineReply(env,event.replyToken,"ไม่พบตัวย่อหุ้น กรุณาส่งคำสั่งใหม่");
       } else {
         await env.DB.prepare("INSERT INTO line_pending_stock_actions(user_id,action,symbols_json,expires_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET action=excluded.action,symbols_json=excluded.symbols_json,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP")
           .bind(user.id,cmd.action,JSON.stringify(symbols),now+180).run();
         await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=?").bind(user.id).run();
-        const verb=cmd.action==="add"?"เพิ่ม":"ลบ";
-        await lineReply(env,event.replyToken,"โปรดยืนยันคำสั่ง"+verb+"หุ้นนี้:\\n"+symbols.join(", ")+"\\n\\nกด “ยืนยัน” เพื่อดำเนินการ หรือ “ยกเลิก” เพื่อไม่เปลี่ยนแปลงรายการ\\n\\nคำสั่งนี้จะถูกล้างอัตโนมัติใน 3 นาที",stockActionConfirmQuickReply());
+        if(cmd.action==="remove") {
+          const current=await getWatchlist(env,user.id);
+          const remaining=current.filter(x=>!symbols.includes(x));
+          const more=remaining.length>11?"\\nแสดงตัวเลือกที่เหลือ 11 หุ้นแรก พิมพ์ “ลบ TICKER” เพื่อเลือกหุ้นอื่น":"";
+          await lineReply(env,event.replyToken,"เลือกหุ้นที่จะลบแล้ว: "+symbols.join(", ")+"\\n\\nกดเลือกหุ้นเพิ่มได้อีกหลายตัว แล้วค่อยกด “ยืนยัน” ครั้งเดียว หรือกด “ยกเลิก”\\nคำสั่งหมดอายุใน 3 นาที"+more,watchlistQuickReply(remaining,true));
+        } else {
+          await lineReply(env,event.replyToken,"โปรดยืนยันคำสั่งเพิ่มหุ้นนี้:\\n"+symbols.join(", ")+"\\n\\nกด “ยืนยัน” เพื่อดำเนินการ หรือ “ยกเลิก” เพื่อไม่เปลี่ยนแปลงรายการ\\n\\nคำสั่งนี้จะถูกล้างอัตโนมัติใน 3 นาที",stockActionConfirmQuickReply());
+        }
       }
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
