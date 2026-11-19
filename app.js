@@ -12,6 +12,7 @@ const state = {
   busy:false,
   intradayBusy:false,
   watchlistSyncBusy:false,
+  removingSymbols:new Set(),
   watchlistSyncCandidate:"",
   watchlistSyncCandidateCount:0,
   symbols:loadSavedSymbols(),
@@ -289,6 +290,8 @@ async function startLinePairing() {
   setTimeout(pollLineLink,1200);
 }
 async function syncSharedWatchlist() {
+  // Pause polling while a user-initiated deletion is in flight, so a stale /api/me snapshot cannot restore the symbol.
+  if(state.removingSymbols?.size)return;
   // Do not allow overlapping 3-second polls: an older /api/me response can
   // otherwise finish last and overwrite a newer, complete Watchlist.
   if(!state.shared||state.watchlistSyncBusy)return;
@@ -359,17 +362,33 @@ async function initializeAccount() {
   }
 }
 async function removeSymbol(symbol) {
+  symbol=String(symbol||"").trim().toUpperCase();
+  if(!symbol||state.removingSymbols.has(symbol))return;
+  state.removingSymbols.add(symbol);
+  const removeButtons=[...document.querySelectorAll("[data-remove]")].filter(b=>b.dataset.remove===symbol);
+  removeButtons.forEach(b=>{b.disabled=true;b.textContent="…";});
   try {
     if(state.shared) {
       const data=await apiRequest("/api/watchlist/remove",{method:"POST",body:JSON.stringify({symbol})});
-      state.symbols=data.symbols||[];
+      if(!Array.isArray(data.symbols))throw new Error("เซิร์ฟเวอร์ไม่ส่งรายการ Watchlist กลับมา");
+      state.symbols=data.symbols.filter(s=>s!==symbol);
     } else {
       state.symbols=state.symbols.filter(s=>s!==symbol);
     }
+    state.watchlistSyncCandidate="";
+    state.watchlistSyncCandidateCount=0;
     saveSymbols();
     renderWatchlist();
-    loadMarket();
-  } catch(e) {setStatus("ลบหุ้นไม่สำเร็จ: "+e.message);}
+    await loadMarket();
+    setStatus("ลบ "+symbol+" ออกจาก Watchlist แล้ว",true);
+  } catch(e) {
+    setStatus("ลบหุ้นไม่สำเร็จ: "+e.message);
+  } finally {
+    state.removingSymbols.delete(symbol);
+    // Repaint controls to restore the normal remove button after completion/failure.
+    const allDisplaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
+    renderMarketCards(allDisplaySymbols,state.market);
+  }
 }
 async function fetchMarket(symbols,timeframe=state.timeframe){
   const result={},groups=[symbols.filter(s=>!isThaiSymbol(s)),symbols.filter(isThaiSymbol)].filter(group=>group.length);
