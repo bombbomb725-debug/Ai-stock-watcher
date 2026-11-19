@@ -463,15 +463,16 @@ async function loadMarket(){
   }catch(e){setStatus("เชื่อมต่อไม่สำเร็จ");$("#usCards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลหุ้นสหรัฐฯ ไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p></article>';$("#thaiCards").innerHTML='<article class="stock-card"><b>โหลดข้อมูลหุ้นไทยไม่สำเร็จ</b><p>'+escapeHtml(e.message)+'</p></article>';}
   finally{state.busy=false;$("#refresh").disabled=false;$("#refresh").textContent="↻ อัปเดต";}
 }
-async function addSymbol(symbol){
+async function addSymbol(symbol,market="AUTO"){
   symbol=String(symbol||"").trim().toUpperCase();
-  symbol=(await resolveSymbols([symbol]))[0];
+  market=String(market||"AUTO").toUpperCase();
+  if(market!=="US")symbol=(await resolveSymbols([symbol]))[0];
   if(!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)){setStatus("Ticker ไม่ถูกต้อง");return;}
   if(state.symbols.includes(symbol)){setStatus(symbol+" อยู่ในรายการแล้ว",true);return;}
   if(state.symbols.length>=50){setStatus("ครบจำนวนสูงสุด 50 หุ้นแล้ว");return;}
   try {
     if(!state.shared)throw new Error("กรุณาเชื่อมบัญชี LINE ก่อนเพิ่มหุ้น เพื่อให้ Watchlist บนเว็บและ LINE เป็นรายการเดียวกัน");
-    const data=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol})});
+    const data=await apiRequest("/api/watchlist/add",{method:"POST",body:JSON.stringify({symbol,market})});
     state.symbols=data.symbols||state.symbols;
     saveSymbols();
     renderWatchlist();
@@ -498,7 +499,7 @@ function renderScreenerPage(){
   const rows=shown.map((x,i)=>{
     const already=state.symbols.includes(x.symbol);
     const label=x.status==="buy"?"แนวโน้มผ่านเงื่อนไข":x.status==="risk"?"แนวโน้มอ่อน":"รอการยืนยัน";
-    return '<div class="rank-row"><b>#'+((screenerPage-1)*pageSize+i+1)+' '+escapeHtml(x.symbol)+'</b><span class="signal '+(x.status==="buy"?"buy":x.status==="risk"?"risk":"wait")+'">'+label+'</span><span>'+Number(x.score||0)+'/5</span><button type="button" data-screener-add="'+escapeHtml(x.symbol)+'" '+(already?'disabled':'')+'>'+(already?'อยู่ในรายการแล้ว':'เพิ่มใน LINE + เว็บ')+'</button></div>';
+    return '<div class="rank-row"><b>#'+((screenerPage-1)*pageSize+i+1)+' '+escapeHtml(x.symbol)+'</b><span class="signal '+(x.status==="buy"?"buy":x.status==="risk"?"risk":"wait")+'">'+label+'</span><span>'+Number(x.score||0)+'/5</span><button type="button" data-screener-add="'+escapeHtml(x.symbol)+'" data-screener-market="US" '+(already?'disabled':'')+'>'+(already?'อยู่ในรายการแล้ว':'เพิ่มใน LINE + เว็บ')+'</button></div>';
   }).join("");
   const pager=pages>1?'<div class="screener-pager"><button type="button" data-screener-page="'+(screenerPage-1)+'" '+(screenerPage===1?'disabled':'')+'>หน้าก่อน</button><span>หน้า '+screenerPage+' / '+pages+'</span><button type="button" data-screener-page="'+(screenerPage+1)+'" '+(screenerPage===pages?'disabled':'')+'>หน้าถัดไป</button></div>':"";
   root.innerHTML=header+(rows||'<div class="screener-empty">ไม่พบหุ้นที่มีข้อมูลย้อนหลังเพียงพอ</div>')+pager;
@@ -535,7 +536,7 @@ $("#usCards").addEventListener("click",e=>{
 });
 $("#thaiCards").addEventListener("click",e=>{const b=e.target.closest("[data-remove]");if(b)removeSymbol(b.dataset.remove);});
 $("#runScreener").addEventListener("click",runScreener);
-$("#screenerResults").addEventListener("click",e=>{const add=e.target.closest("[data-screener-add]");if(add){addSymbol(add.dataset.screenerAdd);return;}const page=e.target.closest("[data-screener-page]");if(page){screenerPage=Number(page.dataset.screenerPage);renderScreenerPage();}});
+$("#screenerResults").addEventListener("click",e=>{const add=e.target.closest("[data-screener-add]");if(add){addSymbol(add.dataset.screenerAdd,add.dataset.screenerMarket||"US");return;}const page=e.target.closest("[data-screener-page]");if(page){screenerPage=Number(page.dataset.screenerPage);renderScreenerPage();}});
 $("#enableAlerts").addEventListener("click",async()=>{
   if(!("Notification" in window)){setStatus("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");return;}
   const permission=await Notification.requestPermission();
