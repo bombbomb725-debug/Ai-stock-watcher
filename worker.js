@@ -257,6 +257,15 @@ function watchlistQuickReply(symbols) {
   }));
   return items.length?{items}:undefined;
 }
+function stockActionConfirmQuickReply() {
+  return {items:[
+    {type:"action",action:{type:"message",label:"ยืนยัน",text:"ยืนยัน"}},
+    {type:"action",action:{type:"message",label:"ยกเลิก",text:"ยกเลิก"}}
+  ]};
+}
+async function ensurePendingStockActionTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS line_pending_stock_actions (user_id INTEGER PRIMARY KEY, action TEXT NOT NULL, symbols_json TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
+}
 async function lineReply(env,replyToken,text,quickReply) {
   if(!replyToken||!env.LINE_CHANNEL_ACCESS_TOKEN)return;
   const message={type:"text",text:String(text).slice(0,4900)};
@@ -429,6 +438,8 @@ function parseSymbols(value) {
 }
 function parseLineCommand(text) {
   const t=String(text||"").trim();
+  if(/^(?:ยืนยัน|confirm)$/i.test(t))return {action:"confirm_stock_action"};
+  if(/^(?:ยกเลิก|cancel)$/i.test(t))return {action:"cancel_stock_action"};
   let m=t.match(/^(?:เพิ่ม|add|\/add)\s+(.+)$/i);
   if(m){const symbols=parseSymbols(m[1]);return symbols?{action:"add",symbols}:{action:"invalid_symbols"};}
   m=t.match(/^(?:ลบ|remove|\/remove)\s+(.+)$/i);
@@ -451,6 +462,9 @@ async function handleLineWebhook(raw,signature,env) {
   if(!dbReady(env))return json({error:"D1 binding DB is missing"},503);
   if(!await verifyLineSignature(raw,signature||"",env.LINE_CHANNEL_SECRET))return json({error:"Invalid LINE signature"},401);
   let payload; try{payload=JSON.parse(new TextDecoder().decode(raw));}catch{return json({error:"Invalid JSON"},400);}
+  await ensurePendingStockActionTable(env);
+  const nowForCleanup=Math.floor(Date.now()/1000);
+  await env.DB.prepare("DELETE FROM line_pending_stock_actions WHERE expires_at<=?").bind(nowForCleanup).run();
   for(const event of payload.events||[]) {
     const lineUserId=event.source?.userId;
     if(!lineUserId)continue;
@@ -470,12 +484,45 @@ async function handleLineWebhook(raw,signature,env) {
       continue;
     }
     if(!isTextMessage)continue;
-    const inputMode=await env.DB.prepare("SELECT mode FROM user_input_modes WHERE user_id=? AND expires_at>?").bind(user.id,Math.floor(Date.now()/1000)).first();
+    const now=Math.floor(Date.now()/1000);
+    await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=? AND expires_at<=?").bind(user.id,now).run();
+    const inputMode=await env.DB.prepare("SELECT mode FROM user_input_modes WHERE user_id=? AND expires_at>?").bind(user.id,now).first();
     if(inputMode && !["link","add_prompt","remove_menu","settings","alert_on","alert_off","list","ideas","test"].includes(cmd.action)) {
       const symbols=parseSymbols(event.message.text);
       if(symbols)cmd.action=inputMode.mode==="add"?"add":"remove",cmd.symbols=symbols;
     }
-    if(cmd.action==="link") {
+    if(cmd.action==="confirm_stock_action"||cmd.action==="cancel_stock_action") {
+      const pending=await env.DB.prepare("SELECT action,symbols_json,expires_at FROM line_pending_stock_actions WHERE user_id=? AND expires_at>?").bind(user.id,now).first();
+      if(cmd.action==="cancel_stock_action") {
+        await env.DB.prepare("DELETE FROM line_pending_stock_actions WHERE user_id=?").bind(user.id).run();
+        await lineReply(env,event.replyToken,pending?"ยกเลิกคำสั่งแล้ว ไม่มีการเปลี่ยนแปลง Watchlist":"ไม่มีคำสั่งค้างให้ยกเลิก");
+      } else if(!pending) {
+        await lineReply(env,event.replyToken,"ไม่มีคำสั่งที่รอยืนยันแล้ว หรือคำสั่งหมดเวลา 3 นาที กรุณาเลือกใหม่อีกครั้ง");
+      } else {
+        let symbols=[];
+        try { symbols=JSON.parse(pending.symbols_json); } catch {}
+        if(!Array.isArray(symbols)||!symbols.length) {
+          await env.DB.prepare("DELETE FROM line_pending_stock_actions WHERE user_id=?").bind(user.id).run();
+          await lineReply(env,event.replyToken,"คำสั่งไม่สมบูรณ์ ถูกล้างแล้ว กรุณาเริ่มใหม่");
+        } else {
+          const results=[];
+          for(const symbol of symbols) {
+            if(pending.action==="add") {
+              const result=await addWatch(env,user.id,symbol);
+              results.push(result.ok?(result.already?"มี "+symbol+" อยู่แล้ว":"เพิ่ม "+symbol+" สำเร็จ"):"เพิ่ม "+symbol+" ไม่สำเร็จ: "+result.error);
+            } else if(pending.action==="remove") {
+              const before=await getWatchlist(env,user.id);
+              if(!before.includes(symbol))results.push("ไม่พบ "+symbol+" ใน Watchlist");
+              else {const result=await removeWatch(env,user.id,symbol);results.push("ลบ "+symbol+" สำเร็จ · เหลือ "+result.symbols.length+" หุ้น");}
+            }
+          }
+          await env.DB.prepare("DELETE FROM line_pending_stock_actions WHERE user_id=?").bind(user.id).run();
+          await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=?").bind(user.id).run();
+          const current=await getWatchlist(env,user.id);
+          await lineReply(env,event.replyToken,results.join("\\n")+"\\n\\nWatchlist ปัจจุบัน "+current.length+"/50 หุ้น");
+        }
+      }
+    } else if(cmd.action==="link") {
       const codeHash=await sha256Hex(cmd.code),now=Math.floor(Date.now()/1000);
       const pending=await env.DB.prepare("SELECT code_hash FROM web_link_sessions WHERE code_hash=? AND user_id IS NULL AND code_expires_at>?").bind(codeHash,now).first();
       if(!pending) {
@@ -486,13 +533,13 @@ async function handleLineWebhook(raw,signature,env) {
         else await lineReply(env,event.replyToken,"รหัสนี้ถูกใช้ไปแล้ว กรุณาสร้างรหัสใหม่จากเว็บไซต์");
       }
     } else if(cmd.action==="add_prompt") {
-      await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"add",Math.floor(Date.now()/1000)+600).run();
+      await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"add",now+180).run();
       await lineReply(env,event.replyToken,"พิมพ์ตัวย่อหุ้นที่ต้องการเพิ่มได้เลย เช่น\nAMZN\nหรือหลายตัว: AMZN NVDA\nหรือคั่นด้วยจุลภาค: AMZN,NVDA\nหมดเวลารับรายการใน 10 นาที");
     } else if(cmd.action==="remove_menu") {
       const symbols=await getWatchlist(env,user.id);
       if(!symbols.length)await lineReply(env,event.replyToken,"Watchlist ยังว่าง ไม่มีหุ้นให้ลบ");
       else {
-        await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"remove",Math.floor(Date.now()/1000)+600).run();
+        await env.DB.prepare("INSERT INTO user_input_modes(user_id,mode,expires_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").bind(user.id,"remove",now+180).run();
         const more=symbols.length>13?"\\n(ปุ่มเลือกแสดงได้ 13 หุ้นแรก หากต้องการลบตัวอื่น พิมพ์ ลบ ตามด้วยตัวย่อหุ้น)":"";
         await lineReply(env,event.replyToken,"เลือกหุ้นที่ต้องการลบจากปุ่มด้านล่างได้เลย ("+symbols.length+" หุ้นในรายการ)"+more,watchlistQuickReply(symbols));
       }
@@ -506,25 +553,15 @@ async function handleLineWebhook(raw,signature,env) {
     } else if(cmd.action==="invalid_symbols") {
       await lineReply(env,event.replyToken,"รูปแบบตัวย่อไม่ถูกต้อง กรุณาส่งเช่น AMZN หรือ AMZN NVDA หรือ AMZN,NVDA");
     } else if(cmd.action==="add"||cmd.action==="remove") {
-      const symbols=cmd.symbols||[];
-      const results=[];
-      for(const symbol of symbols) {
-        if(cmd.action==="add") {
-          const result=await addWatch(env,user.id,symbol);
-          results.push(result.ok?(result.already?"มี "+symbol+" อยู่แล้ว":"เพิ่ม "+symbol+" สำเร็จ"):"เพิ่ม "+symbol+" ไม่สำเร็จ: "+result.error);
-        } else {
-          const before=await getWatchlist(env,user.id);
-          if(!before.includes(symbol))results.push("ไม่พบ "+symbol+" ใน Watchlist");
-          else {const result=await removeWatch(env,user.id,symbol);results.push("ลบ "+symbol+" สำเร็จ · เหลือ "+result.symbols.length+" หุ้น");}
-        }
-      }
-      await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=?").bind(user.id).run();
-      const current=await getWatchlist(env,user.id);
-      const summary=results.join("\\n")+"\\n\\nWatchlist ปัจจุบัน "+current.length+"/50 หุ้น";
-      if(cmd.action==="remove"&&current.length) {
-        await lineReply(env,event.replyToken,summary+"\\nเลือกหุ้นที่ต้องการลบต่อได้จากปุ่มด้านล่าง",watchlistQuickReply(current));
+      const symbols=[...new Set((cmd.symbols||[]).map(cleanSymbol))];
+      if(!symbols.length) {
+        await lineReply(env,event.replyToken,"ไม่พบตัวย่อหุ้น กรุณาส่งคำสั่งใหม่");
       } else {
-        await lineReply(env,event.replyToken,summary);
+        await env.DB.prepare("INSERT INTO line_pending_stock_actions(user_id,action,symbols_json,expires_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET action=excluded.action,symbols_json=excluded.symbols_json,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP")
+          .bind(user.id,cmd.action,JSON.stringify(symbols),now+180).run();
+        await env.DB.prepare("DELETE FROM user_input_modes WHERE user_id=?").bind(user.id).run();
+        const verb=cmd.action==="add"?"เพิ่ม":"ลบ";
+        await lineReply(env,event.replyToken,"โปรดยืนยันคำสั่ง"+verb+"หุ้นนี้:\\n"+symbols.join(", ")+"\\n\\nกด “ยืนยัน” เพื่อดำเนินการ หรือ “ยกเลิก” เพื่อไม่เปลี่ยนแปลงรายการ\\n\\nคำสั่งนี้จะถูกล้างอัตโนมัติใน 3 นาที",stockActionConfirmQuickReply());
       }
     } else if(cmd.action==="list") {
       const symbols=await getWatchlist(env,user.id);
