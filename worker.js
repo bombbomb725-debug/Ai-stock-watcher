@@ -623,19 +623,19 @@ async function fetchDataCedarThai(env,symbol,timeframe="1Day") {
   return data;
 }
 async function fetchYahooThai(env,symbol,timeframe="1Day") {
-  try {
-    const data=await fetchDataCedarThai(env,symbol,timeframe);
-    // A stale DataCedar cache is not a successful live fetch: try Yahoo before returning it.
-    if(data?.stale) {
-      console.warn("DATACEDAR_STALE_TRY_YAHOO",symbol,String(data.error||"stale cache"));
-      try{return await fetchYahooThaiLegacy(symbol,timeframe);}
-      catch(yahooError){console.warn("YAHOO_FALLBACK_FAILED",symbol,String(yahooError));return data;}
-    }
+  // Race both providers. A slow DataCedar response must not block a faster Yahoo quote.
+  let dataCedarStale=null,dataCedarError=null,yahooError=null;
+  const primary=fetchDataCedarThai(env,symbol,timeframe).then(data=>{
+    if(data?.stale){dataCedarStale=data;throw new Error(data.error||"DataCedar returned stale cache");}
     return data;
-  } catch(dataCedarError) {
-    console.warn("DATACEDAR_UNAVAILABLE",symbol,String(dataCedarError));
-    try{return await fetchYahooThaiLegacy(symbol,timeframe);}
-    catch(yahooError){throw new Error("DataCedar: "+String(dataCedarError)+"; Yahoo fallback: "+String(yahooError));}
+  }).catch(error=>{dataCedarError=error;throw error;});
+  const fallback=fetchYahooThaiLegacy(symbol,timeframe).catch(error=>{yahooError=error;throw error;});
+  try {
+    return await Promise.any([primary,fallback]);
+  } catch(e) {
+    console.warn("THAI_MARKET_BOTH_SOURCES_FAILED",symbol,String(dataCedarError||e),String(yahooError||""));
+    if(dataCedarStale)return dataCedarStale;
+    throw new Error("DataCedar: "+String(dataCedarError||"unavailable")+"; Yahoo fallback: "+String(yahooError||"unavailable"));
   }
 }
 async function fetchYahooThaiLegacy(symbol,timeframe="1Day") {
