@@ -494,7 +494,7 @@ function renderScreenerPage(){
   const root=$("#screenerResults"),pageSize=10,total=screenerRanked.length,pages=Math.max(1,Math.ceil(total/pageSize));
   screenerPage=Math.min(Math.max(1,screenerPage),pages);
   const shown=screenerRanked.slice((screenerPage-1)*pageSize,screenerPage*pageSize);
-  const header='<div class="screener-summary">พบ '+total+' หุ้น · แสดงอันดับ '+((screenerPage-1)*pageSize+1)+'–'+Math.min(screenerPage*pageSize,total)+' จาก '+total+' หุ้น · สแกนได้ '+(window.screenerScannedCount||0)+' หุ้น</div>';
+  const header='<div class="screener-summary">'+escapeHtml(window.screenerSourceLabel||"หุ้นจากโพสต์ @StockSavvyShay")+' · พบ '+total+' หุ้น · แสดงอันดับ '+((screenerPage-1)*pageSize+1)+'–'+Math.min(screenerPage*pageSize,total)+' จาก '+total+' หุ้น · สแกนได้ '+(window.screenerScannedCount||0)+' หุ้น</div>';
   const rows=shown.map((x,i)=>{
     const already=state.symbols.includes(x.symbol);
     const label=x.status==="buy"?"แนวโน้มผ่านเงื่อนไข":x.status==="risk"?"แนวโน้มอ่อน":"รอการยืนยัน";
@@ -512,6 +512,7 @@ async function runScreener(){
     screenerRanked=data.ideas||[];
     screenerPage=1;
     window.screenerScannedCount=Number(data.scannedCount||0);
+    window.screenerSourceLabel=data.source?.label||"หุ้นจากโพสต์ @StockSavvyShay";
     renderScreenerPage();
   }catch(e){root.textContent="คัดกรองไม่สำเร็จ: "+e.message;}
   finally{btn.disabled=false;btn.textContent="คัดกรองอีกครั้ง";}
