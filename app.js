@@ -416,21 +416,45 @@ function isUsRegularSession(){
   const minutes=Number(v.hour)*60+Number(v.minute);
   return v.weekday!=="Sat"&&v.weekday!=="Sun"&&minutes>=570&&minutes<960;
 }
+function isThaiRegularSession(){
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Bangkok",weekday:"short",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());
+  const v=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  const minutes=Number(v.hour)*60+Number(v.minute);
+  const date=v.year+"-"+v.month+"-"+v.day;
+  const holidays=new Set(["2026-01-01","2026-01-02","2026-03-03","2026-04-06","2026-04-13","2026-04-14","2026-04-15","2026-05-01","2026-05-04","2026-06-01","2026-06-03","2026-07-28","2026-07-29","2026-08-12","2026-10-13","2026-10-16","2026-10-23","2026-12-07","2026-12-10","2026-12-31"]);
+  const weekday=v.weekday!=="Sat"&&v.weekday!=="Sun";
+  return weekday&&!holidays.has(date)&&((minutes>=600&&minutes<750)||(minutes>=840&&minutes<990));
+}
 async function refreshIntradayBars(){
-  if(!isUsRegularSession()||document.hidden||state.busy||state.intradayBusy||!Object.keys(state.market).length)return;
-  const symbols=Object.keys(state.market).filter(s=>!isThaiSymbol(s));
+  if(document.hidden||state.busy||state.intradayBusy||!Object.keys(state.market).length)return;
+  const usOpen=isUsRegularSession();
+  const thaiOpen=isThaiRegularSession();
+  const usSymbols=usOpen?[...new Set([...state.symbols.filter(s=>!isThaiSymbol(s)),...(state.focusSymbol&&!isThaiSymbol(state.focusSymbol)?[state.focusSymbol]:[])])].filter(s=>state.market[s]):[];
+  const thaiSymbols=thaiOpen?[...new Set([...state.symbols.filter(isThaiSymbol),...(state.focusSymbol&&isThaiSymbol(state.focusSymbol)?[state.focusSymbol]:[])])].filter(s=>state.market[s]):[];
+  if(!usSymbols.length&&!thaiSymbols.length)return;
   state.intradayBusy=true;
   try{
-    const data=await fetchMarket(symbols,"5Min");
-    for(const symbol of symbols){
-      if(!state.market[symbol]||!data[symbol])continue;
-      state.market[symbol].intradayBars=data[symbol].bars||state.market[symbol].intradayBars||[];
-      if(data[symbol].trade)state.market[symbol].trade=data[symbol].trade;
+    const requests=[];
+    if(usSymbols.length)requests.push(fetchMarket(usSymbols,"5Min").then(data=>({symbols:usSymbols,data})));
+    if(thaiSymbols.length)requests.push(fetchMarket(thaiSymbols,"5Min").then(data=>({symbols:thaiSymbols,data})));
+    const outcomes=await Promise.allSettled(requests);
+    let updated=false;
+    for(const outcome of outcomes){
+      if(outcome.status!=="fulfilled"){console.warn("INTRADAY_MARKET_REFRESH_FAILED",outcome.reason);continue;}
+      const {symbols,data}=outcome.value;
+      for(const symbol of symbols){
+        if(!state.market[symbol]||!data[symbol])continue;
+        state.market[symbol].intradayBars=data[symbol].bars||state.market[symbol].intradayBars||[];
+        if(data[symbol].trade)state.market[symbol].trade=data[symbol].trade;
+        updated=true;
+      }
     }
-    // Refresh only US market data, but always render the complete Watchlist.
-    const allDisplaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
-    renderMarketCards(allDisplaySymbols,state.market);
-    $("#updated").textContent="อัปเดตกราฟระหว่างวัน "+new Date().toLocaleTimeString("th-TH")+" · แท่ง 5 นาที";
+    if(updated){
+      const allDisplaySymbols=[...new Set([...state.symbols,...(state.focusSymbol?[state.focusSymbol]:[])])];
+      renderMarketCards(allDisplaySymbols,state.market);
+      const activeMarkets=[usSymbols.length?"สหรัฐฯ":null,thaiSymbols.length?"ไทย":null].filter(Boolean).join(" + ");
+      $("#updated").textContent="อัปเดตกราฟระหว่างวัน "+new Date().toLocaleTimeString("th-TH")+" · "+activeMarkets+" · แท่ง 5 นาที";
+    }
   }catch(e){console.warn("INTRADAY_BAR_REFRESH_FAILED",e);}
   finally{state.intradayBusy=false;}
 }
