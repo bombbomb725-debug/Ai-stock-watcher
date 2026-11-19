@@ -11,6 +11,9 @@ const fmt = n => Number.isFinite(n) ? n.toLocaleString("en-US",{minimumFractionD
 const state = {
   busy:false,
   intradayBusy:false,
+  watchlistSyncBusy:false,
+  watchlistSyncCandidate:"",
+  watchlistSyncCandidateCount:0,
   symbols:loadSavedSymbols(),
   assets:[],
   market:{},
@@ -286,15 +289,37 @@ async function startLinePairing() {
   setTimeout(pollLineLink,1200);
 }
 async function syncSharedWatchlist() {
-  if(!state.shared||state.busy)return;
+  // Do not allow overlapping 3-second polls: an older /api/me response can
+  // otherwise finish last and overwrite a newer, complete Watchlist.
+  if(!state.shared||state.watchlistSyncBusy)return;
+  state.watchlistSyncBusy=true;
   try {
     const data=await apiRequest("/api/me");
-    const next=data.symbols||[];
+    if(!Array.isArray(data.symbols))return;
+    const next=[...new Set(data.symbols.filter(s=>typeof s==="string"&&/^[A-Z][A-Z0-9.]{0,9}$/.test(s)))];
+    // An empty response is not treated as an intentional mass deletion.
+    if(!next.length&&state.symbols.length)return;
     if(JSON.stringify(next)!==JSON.stringify(state.symbols)) {
+      const candidate=JSON.stringify(next);
+      // Confirm a changed server snapshot twice before replacing the visible
+      // list. This prevents a transient/incomplete response from making Thai
+      // stocks disappear immediately after the page has rendered them.
+      if(candidate!==state.watchlistSyncCandidate) {
+        state.watchlistSyncCandidate=candidate;
+        state.watchlistSyncCandidateCount=1;
+        return;
+      }
+      state.watchlistSyncCandidateCount++;
+      if(state.watchlistSyncCandidateCount<2)return;
       state.symbols=next;
+      state.watchlistSyncCandidate="";
+      state.watchlistSyncCandidateCount=0;
       saveSymbols();
       renderWatchlist();
       loadMarket();
+    } else {
+      state.watchlistSyncCandidate="";
+      state.watchlistSyncCandidateCount=0;
     }
   } catch(e) {
     if(e.message.includes("เข้าสู่ระบบ")) {
@@ -303,6 +328,8 @@ async function syncSharedWatchlist() {
       renderWatchlist();
       $("#accountStatus").textContent="เซสชันหมดอายุ กรุณาเชื่อม LINE ใหม่";
     }
+  } finally {
+    state.watchlistSyncBusy=false;
   }
 }
 async function initializeAccount() {
