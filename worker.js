@@ -1016,14 +1016,18 @@ async function apiHandler(request,env,url,headers) {
     }
   }
   if(url.pathname==="/api/assets"&&request.method==="GET") {
-    const q=(url.searchParams.get("q")||"").trim().toUpperCase();if(!q||q.length>30)return json({assets:[]},200,headers);
+    const raw=(url.searchParams.get("q")||"").trim().toUpperCase();
+    const q=raw.replace(/\.BK$/,"").trim();if(!q||q.length>30)return json({assets:[]},200,headers);
+    const thaiQuery=/[\\u0E00-\\u0E7F]/.test(q)||/^[A-Z0-9]{1,8}$/.test(q);
     const [us,thai]=await Promise.allSettled([
-      (async()=>{const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};const r=await fetch("https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",{headers:auth});if(!r.ok)throw new Error("Alpaca HTTP "+r.status);const all=await r.json();return all.filter(a=>a.tradable&&a.exchange&&((a.symbol||"").toUpperCase().includes(q)||(a.name||"").toUpperCase().includes(q))).slice(0,12).map(a=>({symbol:a.symbol,name:a.name,exchange:a.exchange,market:"US"}));})(),
-      (async()=>{const all=await getThaiSecurities();return all.filter(x=>String(x.symbol||"").toUpperCase().includes(q)||String(x.name||"").toUpperCase().includes(q)).slice(0,12).map(x=>({symbol:String(x.symbol).toUpperCase()+".BK",name:x.name,exchange:x.market||"SET",market:"THAI"}));})()
+      (async()=>{if(/[\\u0E00-\\u0E7F]/.test(q))return [];const auth={"APCA-API-KEY-ID":env.ALPACA_KEY,"APCA-API-SECRET-KEY":env.ALPACA_SECRET};const r=await fetch("https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",{headers:auth});if(!r.ok)throw new Error("Alpaca HTTP "+r.status);const all=await r.json();return all.filter(a=>a.tradable&&a.exchange&&((a.symbol||"").toUpperCase().includes(q)||(a.name||"").toUpperCase().includes(q))).slice(0,12).map(a=>({symbol:a.symbol,name:a.name,exchange:a.exchange,market:"US"}));})(),
+      (async()=>{const all=await getThaiSecurities();return all.filter(x=>String(x.symbol||"").toUpperCase().includes(q)||String(x.name||"").toUpperCase().includes(q)).slice(0,20).map(x=>({symbol:String(x.symbol).toUpperCase()+".BK",name:x.name,exchange:x.market||"SET",market:"THAI"}));})()
     ]);
-    const assets=[...(us.status==="fulfilled"?us.value:[]),...(thai.status==="fulfilled"?thai.value:[])].slice(0,20);
+    const thaiAssets=thai.status==="fulfilled"?thai.value:[];
+    const usAssets=us.status==="fulfilled"?us.value:[];
+    const assets=thaiQuery?[...thaiAssets,...usAssets].slice(0,20):[...usAssets,...thaiAssets].slice(0,20);
     if(!assets.length&&us.status==="rejected"&&thai.status==="rejected")return json({error:"ค้นหาหุ้นไม่สำเร็จจากทั้งสองแหล่ง"},502,headers);
-    return json({assets,thaiDirectory:thai.status==="fulfilled"},200,headers);
+    return json({assets,thaiDirectory:thai.status==="fulfilled",thaiDirectoryError:thai.status==="rejected"?String(thai.reason?.message||thai.reason):null},200,headers);
   }
   if(url.pathname==="/api/signals"&&request.method==="GET") {
     if(!dbReady(env))return json({error:"D1 binding DB is missing"},503,headers);
